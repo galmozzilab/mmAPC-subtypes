@@ -1,0 +1,287 @@
+# Integrated WAT and BAT analysis
+This script will generate the following figures:
+
+Figure EV5A - UMAP of aggregated WAT and BAT before regression
+Figure EV5B - UMAP of aggregated WAT and BAT before regression, grouped by depot
+Figure EV5C -  UMAP of aggregated WAT and BAT before regression, grouped by CC phase
+Figure EV5D - Cell count of each cluster in phase before CC regression
+Figure EV5E - UMAP of aggregated WAT and BAT after regression, grouped by CC phase
+Figure EV5F - Cell count of each cluster in phase before CC regression
+Figure EV5G - WAT and BAT cluster distribution in aggregated clusters by cell number count
+Figure 4A left -  UMAP of aggreagated WAT and BAT after CC regression
+Figure 4A top right -  UMAP of aggreagated WAT and BAT after CC regression, highlighting cells from WAT
+Figure 4A bottom right -  UMAP of aggreagated WAT and BAT after CC regression, highlighting cells from BAT
+Figure 4B left - Depot composition of WAT BAT aggregate
+Figure 4B right and 4C - WAT and BAT cluster distribution in aggregated clusters by percentage
+Figure 4D- representative markers of cluster 8 (combined FAPLs)
+Figure 4E - Feature plots of depot markers
+Figure 4F - co-upregulated genes of wFAPLs and bFAPLs; wCAPs and bCAPs
+
+################
+#BEGIN ANALYSIS#
+################
+## 1. Integrate WAT and BAT
+```{r}
+wat_bat_nocc <- Reduce(merge, list(wat_cc,bat_cc))
+wat_bat_nocc <- SCTransform(wat_bat_nocc)
+wat_bat_nocc <- RunPCA(wat_bat_nocc)
+wat_bat_nocc <- FindNeighbors(wat_bat_nocc, dims=1:10) 
+wat_bat_nocc <- FindClusters(wat_bat_nocc, dims=1:10) #9 clusters
+wat_bat_nocc <- RunUMAP(wat_bat_nocc, dims=1:10)
+
+#relabel orig.ident to "White Preadipocytes" and "Brown Preadipocytes
+Idents(wat_bat_nocc) <- "orig.ident"
+new_cluster_ids <- c('White Preadipocytes', "Brown Preadipocytes")
+names(new_cluster_ids) <- levels(wat_bat_nocc)
+
+wat_bat_nocc <- RenameIdents(wat_bat_nocc, new_cluster_ids)
+wat_bat_nocc@meta.data$depot<- as.factor(wat_bat_nocc@active.ident)
+
+
+
+#relabel numeric seurat clusters to APCs
+Idents(wat_bat_nocc) <- "seurat_clusters"
+#new_cluster_ids <- c('APCs 1','APCs 2', 'APCs 3', 'APCs 4', 'APCs 5', 'APCs 6', 'APCs 7', 'APCs 8', 'APCs 9') #original clustering 
+new_cluster_ids <- c('APCs 1','APCs 2', 'APCs 3', 'APCs 7', 'APCs 6', 'APCs 5', 'APCs 9', 'APCs 4', 'APCs 8') #reordered clustering
+
+names(new_cluster_ids) <- levels(wat_bat_nocc_rds)
+
+wat_bat_nocc <- RenameIdents(wat_bat_nocc_rds, new_cluster_ids)
+wat_bat_nocc@meta.data$wat_bat_unregressed_clusters<- as.factor(wat_bat_nocc@active.ident) # new names stored in "wat_bat_unregressed_clusters" metadata
+wat_bat_nocc_rds <- PrepSCTFindMarkers(wat_bat_nocc_rds)
+
+
+DimPlot(wat_bat, pt.size=1.5) #good, this is the plot we want
+```
+
+
+## 2. regressing out cell cycle
+```{r}
+
+#cell cycle scoring
+library(stringr)
+m.s.genes <- str_to_title(cc.genes$s.genes)
+m.g2m.genes <- str_to_title(cc.genes$g2m.genes)
+wat_bat <- CellCycleScoring(wat_bat, s.features = m.s.genes, g2m.features = m.g2m.genes, set.ident = TRUE)
+DimPlot(wat_bat, pt.size=1.5)
+
+#regression starts
+wat_bat_cc <- ScaleData(wat_bat, vars.to.regress = c("S.Score", "G2M.Score"), features = rownames(wat_bat))
+
+wat_bat_cc <- RunPCA(wat_bat_cc)
+wat_bat_cc <- FindNeighbors(wat_bat_cc, dims=1:10)
+wat_bat_cc <- FindClusters(wat_bat_cc, dims=1:10)
+wat_bat_cc <- RunUMAP(wat_bat_cc, dims=1:10)
+DimPlot(wat_bat_cc, pt.size=1.5)
+#DimPlot(wat_bat_cc, pt.size=1.5, group.by= "wat_clusters")
+#DimPlot(wat_bat_cc, pt.size=1.5, group.by= "bat_clusters")
+```
+
+## 3. Merge the metadata column together for plotting and DEGs
+```{r}
+# Replace NA values in the original metadata columns with an empty string
+wat_bat_cc_rds$wat_named_wclusters[is.na(wat_bat_cc_rds$wat_named_wclusters)] <- ""
+wat_bat_cc_rds$bat_named_bclusters[is.na(wat_bat_cc_rds$bat_named_bclusters)] <- ""
+
+# Now, paste the columns together
+wat_bat_cc_rds$merged_wat_bat_clusters <- paste(wat_bat_cc_rds$wat_named_wclusters, wat_bat_cc_rds$bat_named_bclusters, sep = "")
+DimPlot(wat_bat_cc_rds, group.by="merged_wat_bat_clusters")
+
+```
+
+## 4. rename clusters after regression
+```{r}
+Idents(wat_bat_cc_rds) <-"seurat_clusters"
+
+new_cluster_ids <- c(1,4,8,5,2,6,7,3,9) #reordered clustering
+
+names(new_cluster_ids) <- levels(wat_bat_cc_rds)
+
+wat_bat_cc_rds <- RenameIdents(wat_bat_cc_rds, new_cluster_ids)
+wat_bat_cc_rds@meta.data$wat_bat_regressed_clusters<- as.factor(wat_bat_cc_rds@active.ident) # new names stored in "wat_bat_unregressed_clusters" metadata
+```
+
+## 5. Find markers of cluster 8 
+```{r}
+Idents(wat_bat_cc) <- 'wat_bat_regressed_clusters'
+wat_bat_cc <- PrepSCTFindMarkers(wat_bat_cc)
+c8_markers <- FindMarkers(wat_bat_cc, ident.1=8)
+```
+
+##############################
+
+
+# FIGURES
+
+## Figure EV5A - UMAP of aggregated WAT and BAT before regression
+```{r}
+wat_bat_nocc_cols=c("coral","hotpink",'red','brown','tan','navy','plum4','purple','khaki')
+DimPlot(wat_bat_nocc, pt.size=2, cols=wat_bat_nocc_cols, group.by= "wat_bat_unregressed_clusters")
+```
+
+## Figure EV5B - UMAP of aggregated WAT and BAT before regression, grouped by depot
+```{r}
+depot_col=c("khaki",'royalblue')
+DimPlot(wat_bat_nocc, pt.size=2, cols=depot_col, group.by='depot')
+```
+
+## Figure EV5C -  UMAP of aggregated WAT and BAT before regression, grouped by CC phase
+```{r}
+DimPlot(wat_bat_nocc, pt.size=2, group.by='Phase')
+```
+
+## Figure EV5D - Cell count of each cluster in phase before CC regression
+```{r}
+table(wat_bat_nocc$wat_bat_unregressed_clusters, wat_bat_nocc$Phase)
+```
+
+## Figure EV5E - UMAP of aggregated WAT and BAT after regression, grouped by CC phase
+```{r}
+DimPlot(wat_bat_cc, pt.size=2, group.by='Phase')
+```
+
+## Figure EV5F - Cell count of each cluster in phase before CC regression
+```{r}
+table(wat_bat_cc$wat_bat_regressed_clusters, wat_bat_cc$Phase)
+```
+
+## Figure EV5G - WAT and BAT cluster distribution in aggregated clusters by cell number count
+```{r}
+table(wat_bat_cc$wat_named_wclusters, wat_bat_cc$wat_bat_regressed_clusters)
+table(wat_bat_cc$bat_named_bclusters, wat_bat_cc$wat_bat_regressed_clusters)
+```
+
+
+## Figure 4A left -  UMAP of aggreagated WAT and BAT after CC regression
+```{r}
+combined_colors= c('#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00','#C49A00','#a65628','#f781bf','#00868b')
+DimPlot(wat_bat_cc, cols=combined_colors, pt.size=2, group.by= 'wat_bat_regressed_clusters')
+
+```
+
+## Figure 4A top right -  UMAP of aggreagated WAT and BAT after CC regression, highlighting cells from WAT
+```{r}
+depot_col=c("khaki",'white')
+DimPlot(wat_bat_cc, pt.size=2, cols=depot_col,group.by='depot')
+```
+
+
+## Figure 4A bottom right -  UMAP of aggreagated WAT and BAT after CC regression, highlighting cells from BAT
+```{r}
+depot_col=c("white",'royalblue')
+DimPlot(wat_bat_cc, pt.size=2, cols=depot_col,group.by='depot')
+```
+
+
+## Figure 4B left - Depot composition of WAT BAT aggregate
+```{r}
+table(wat_bat_cc$depot, wat_bat_cc$wat_bat_regressed_clusters)
+```
+
+## Figure 4B right and 4C - WAT and BAT cluster distribution in aggregated clusters by percentage
+```{r}
+table(wat_bat_cc$wat_named_wclusters, wat_bat_cc$wat_bat_regressed_clusters)
+table(wat_bat_cc$bat_named_bclusters, wat_bat_cc$wat_bat_regressed_clusters)
+
+#tables were saved then calculated percentage in excel
+```
+
+## Figure 4D- representative markers of cluster 8 (combined FAPLs)
+```{r}
+combined_colors= c('#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00','#C49A00','#a65628','#f781bf','#00868b')
+#names(combined_colors)= c(1,2,3,4,5,6,7,8,9)
+
+Stacked_VlnPlot(wat_bat_cc, features= c('Col4a2','Col4a1','Cryab','Meox2','Serpinb1a',"Nr2f2",'Pparg'), colors_use=combined_colors, )
+```
+
+## Figure 4E - Feature plots of depot markers
+```{r}
+FeaturePlot(wat_bat_cc, c("Hoxc10","Hoxc9","Zic1")) #feature plots
+
+Idents(wat_bat_cc) = "merged_wat_bat_clusters"
+Stacked_VlnPlot(wat_bat_cc, features= c("Hoxc10","Hoxc9","Zic1"), idents = c('wFAPLs', 'bFAPLs'), colors_use = c("#00868b","#FF0000") ) #Violin plot of bFAPLs vs wFAPLs
+```
+
+
+#Figure 4F - co-upregulated genes of wFAPLs and bFAPLs; wCAPs and bCAPs
+```{r}
+#need wat_cc and bat_cc object loaded
+DefaultAssay(bat_cc) <- "RNA"
+DefaultAssay(wat_cc) <- "RNA"
+bfapls_markers= FindMarkers(bat_cc, ident.1='bFAPLs') 
+wfapls_markers= FindMarkers(wat_cc, ident.1='wFAPLs')
+bcaps_markers= FindMarkers(bat_cc, ident.1='bCAPs')
+wcaps_markers= FindMarkers(wat_cc, ident.1='wCAPs')
+
+bfapls_markers.up= bfapls_markers %>%
+  filter(p_val_adj < 0.05 & avg_log2FC>0)
+wfapls_markers.up= wfapls_markers %>%
+  filter(p_val_adj < 0.05 & avg_log2FC>0)
+bcaps_markers.up= bcaps_markers %>%
+  filter(p_val_adj < 0.05 & avg_log2FC>0)
+wcaps_markers.up= wcaps_markers %>%
+  filter(p_val_adj < 0.05 & avg_log2FC>0)
+
+common_caps= intersect(rownames(bcaps_markers.up), rownames(wcaps_markers.up))
+common_fapls= intersect(rownames(bfapls_markers.up), rownames(wfapls_markers.up))
+#then count the number in each list. 
+
+#note: rerunning findmarkers can produce different results if some packages are updated.
+
+#originally, the data was saved and processed on excel
+#then, the gene names were separated on comparetwolists.com, where:
+#list A: wcaps or wfapls up markers (p_val_adj<0.05)
+#list B: bcaps or bfapls up markers (p_val_adj<0.05)
+#the output will show genes that are shared and unique
+
+
+```
+
+#####################
+###END OF ANALYSIS###
+#####################
+
+
+
+save all objects for reproducibility
+```{r}
+bat_nocc$bat_unexcluded_clusters <- bat_unexcluded$bat_unexcluded_clusters
+bat_cc$bat_unexcluded_clusters <- bat_unexcluded$bat_unexcluded_clusters
+```
+
+```{r}
+wat_nocc$wat_unexcluded_clusters <- wat_unexcluded$wat_unexcluded_clusters
+wat_cc$wat_unexcluded_clusters <- wat_unexcluded$wat_unexcluded_clusters
+```
+
+```{r}
+wat_bat_cc_diet <- DietSeurat(object = wat_bat_cc_rds,
+  layers =c("data", "scale.data") ,
+  assays=c("RNA", "AUCell", "SCT"),
+  data = TRUE,     # Keep the normalized data slot (for FeaturePlot)
+  counts = NULL,  # Discard raw counts to save space
+  scale.data = TRUE, # Discard scaled data to save space (unless you need it for specific reasons)
+  dimreducs = c("pca", "umap"), # Keep PCA and UMAP embeddings
+  graphs = FALSE, # Discard graphs (unless specific graph analysis is central to your paper)
+  misc = FALSE, # Discard misc slot (often not critical)
+)
+wat_bat_cc_diet[["RNA"]]["scale.data"] <- NULL
+wat_bat_cc_diet[["RNA"]]["counts"] <- NULL
+wat_bat_cc_diet[["SCT"]]["counts"] <- NULL
+wat_bat_cc_diet[["SCT"]]["scale.data"] <- NULL
+
+wat_bat_cc_diet@assays$RNA@layers$counts.0watpreads <- NULL
+wat_bat_cc_diet@assays$RNA@layers$counts.0BATpreads <- NULL
+
+wat_bat_cc_diet@assays$RNA <- NULL
+wat_bat_cc_diet@assays$RNA <- NULL
+
+#wat_bat_nocc_diet@assays$RNA@layers$counts.0watpreads <- NULL
+#wat_bat_nocc_diet@assays$RNA@layers$counts.0BATpreads <- NULL
+
+
+
+saveRDS(wat_bat_cc_diet, file="F:/new_analysis/scripts/publication/wat_bat_cc.rds")
+saveRDS(wat_bat_cc_rds, file="F:/new_analysis/scripts/publication/wat_bat_cc_FULL.rds")
+```
+

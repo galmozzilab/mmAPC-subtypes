@@ -1,0 +1,521 @@
+# bat PROCESSING
+This script will generate the following figures:
+Fig. EV2A- bat UMAP without non-adipocells, grouped by original clusterings
+Fig. EV2B- bat UMAP without non-adipocells before CC regression, grouped by CC Phase
+Fig. EV2C- bat cell cycle distribution pre-regression
+Fig. EV2D - bat UMAP without non-adipocells after CC regression, grouped by CC Phase
+Fig. EV2E - bat cell cycle distribution post-regression
+Fig. EV2B - markers of top 10% wAPC heatmap
+Fig. 1C Pre-exclusion UMAP of bat
+Fig. 1E Plot violin plots of adipocells and non-adipocell markers 
+Fig. 1G - Final UMAP of bat clusters after non-adipocell exclusion and CC regression 
+Fig. 1I - Stacked violin plots of prominent markers
+Fig. 3D Feature plots 
+Fig. 3F Regulon score patterns
+Table EV2 - wAPC markers
+Table EV4 - DEGs between wCAPs vs wFAPLs
+
+#A. Seurat processing
+
+## 1. Load in libraries
+```{r}
+library(Seurat)
+library(readr)
+library(dplyr)
+library(patchwork)
+library(data.table)
+library(ggplot2)
+library(cowplot)
+library(pheatmap)
+library(sctransform)
+library(SeuratDisk)
+library(scater)
+library(tidyverse)
+library(SeuratWrappers)
+library(gplots)
+library(stringr)
+library(scCustomize)
+```
+
+## 2. Load in data
+```{r}
+bat.data = Read10X(data.dir = "//research.drive.wisc.edu/galmozzi/Galmozzi lab/Hoang/Projects/Adipocyte Subtypes/new_analysis/0BAT/filtered_feature_bc_matrix")
+
+```
+
+```{r}
+#convert into seurat object
+bat = CreateSeuratObject(counts = bat.data, project = "0BATpreads", min.cells = 3, min.features = 200)
+bat$data.set = rep("bat", length(bat$orig.ident))
+```
+
+## 3. Calculate % mitochondria RNA and apply filters
+```{r}
+#calculate percent mitochondrial RNA for batpreads
+bat[["percent.mt"]] = PercentageFeatureSet(bat, pattern = "^mt-")
+
+#generate violin plot #genes/cell, mtRNA/cell, reads/cell
+VlnPlot(bat, features= c("nFeature_RNA", "nCount_RNA", "percent.mt"), pt.size=0.5, ncol = 3)
+
+#apply filter-- UMI 6000-60000, features 3900-7700, mito umi 1.7-5
+bat <- subset(bat, subset = nFeature_RNA > 3900 & nFeature_RNA < 7700 & percent.mt < 5& percent.mt > 1.7 & nCount_RNA > 6000 & nCount_RNA < 60000) 
+```
+
+## 4. Data normalization and scaling
+```{r}
+#normalizing the data -normalizes the feature expression measurements for each cell by the total expression, multiplies this by a scale factor (10,000 by default), and log-transforms the result
+bat <- NormalizeData(bat, normalization.method = "LogNormalize", scale.factor = 10000)
+
+#identification of highly variable features
+bat <- FindVariableFeatures(bat, selection.method = "vst", nfeatures = 2000)
+
+#scaling the data 
+all.genes <- rownames(bat)
+bat <- ScaleData(bat, features = all.genes)
+```
+
+## 5. Run PCA and UMAP clustering
+```{r}
+#PCA
+bat <- RunPCA(bat, features = VariableFeatures(object = bat))
+#clustering
+bat <- FindNeighbors(bat, dims = 1:10)
+bat <- FindClusters(bat, resolution = 0.5)
+#umap
+bat <- RunUMAP(bat, dims = 1:10)
+DimPlot(bat, reduction = "umap")
+```
+
+## 6. Find all markers to identify non-adipocells
+
+```{r}
+#find all markers
+bat.markers <- FindAllMarkers(bat,features = VariableFeatures(object = bat))
+
+#renaming identities for subclusters based on the markers identified
+new_cluster_ids <- c('APCs 1', 'APCs 2', "APCs 3", "APCs 4",'APCs 5', 'APCs 6', 'APCs 7',  "Myeloid cells", 'Glial cells' , 'Myoblasts')
+names(new_cluster_ids) <- levels(bat)
+bat <- RenameIdents(bat, new_cluster_ids)
+
+#create a new metadata column called "bat_unexcluded_clusters"
+bat@meta.data$bat_unexcluded_clusters <- as.factor(bat@active.ident) 
+```
+
+Save clustering information
+```{r}
+write.csv(bat$bat_unexcluded_clusters, "F:/new_analysis/scripts/publication/bat_unexcluded_clusters.csv")
+write.csv(bat@reductions$pca@cell.embeddings, "F:/new_analysis/scripts/publication/bat_unexcluded_pca.csv")
+write.csv(bat@reductions$pca@feature.loadings, "F:/new_analysis/scripts/publication/bat_unexcluded_pca_loadings.csv")
+write.csv(bat@reductions$umap@cell.embeddings, "F:/new_analysis/scripts/publication/bat_unexcluded_umap.csv")
+```
+
+
+## 7. Remove non-adipocells and recluster
+```{r}
+#redefine the bat object as bat_unexclude for future reference
+bat_unexcluded <- bat
+
+bat_excluded <- subset(x=bat_unexcluded, 
+                      idents = c("Glial cells", "Myeloid cells", "Myoblasts"),
+                      invert = TRUE) #remove glial and myeloid cells
+
+bat_excluded <- NormalizeData(bat_excluded, normalization.method = "LogNormalize", scale.factor = 10000)
+bat_excluded <- FindVariableFeatures(bat_excluded, selection.method = "vst")
+bat_excluded <- RunPCA(bat_excluded, features = VariableFeatures(object = bat_excluded))
+bat_excluded <- FindNeighbors(bat_excluded, dims = 1:10)
+bat_excluded <- FindClusters(bat_excluded, resolution = 0.5)
+bat_excluded <- RunUMAP(bat_excluded, dims = 1:10)
+```
+
+
+## 8. Cell cycle regression
+## Cell cycle scoring
+```{r}
+#rename bat_excluded to bat_nocc to track cell cycle status
+bat_nocc = bat_excluded
+
+#cell cycle scoring
+m.s.genes <- str_to_title(cc.genes$s.genes)
+m.g2m.genes <- str_to_title(cc.genes$g2m.genes)
+bat_nocc <- CellCycleScoring(bat_nocc, s.features = m.s.genes, g2m.features = m.g2m.genes, set.ident = FALSE)
+```
+## Cell cycle regression
+```{r}
+#REGRESS OUT CELL CYCLE SCORES DURING DATA SCALING
+bat_cc <- ScaleData(bat_nocc, vars.to.regress = c("S.Score", "G2M.Score"), features = rownames(bat_nocc))
+#run PCA 
+bat_cc <- RunPCA(bat_cc, features=VariableFeatures(bat_cc), nfeatures.print=10)
+#RUN UMAP ON CC 
+bat_cc <- FindNeighbors(bat_cc, dims = 1:10)
+bat_cc<- FindClusters(bat_cc, resolution = 0.5)
+bat_cc <- RunUMAP(bat_cc, dims = 1:10, return.model=TRUE)
+```
+
+
+## 9. final cluster names
+```{r}
+Idents(bat_cc) <- "seurat_clusters"
+new_cluster_ids <- c('Early Preads B1', 'Early Preads B2', "bFAPLs", "bCAPs",'Early Preads B3', 'Early Preads B4', 'Early Preads B5')
+names(new_cluster_ids) <- levels(bat_cc)
+bat_cc <- RenameIdents(bat_cc, new_cluster_ids)
+bat_cc@meta.data$bat_named_wclusters <- as.factor(bat_cc@active.ident)
+
+
+
+bat_cc$bat_named_bclusters <- factor(bat_cc$bat_named_bclusters, levels = c('Early Preads B1', "Early Preads B2", "Early Preads B3", "Early Preads B4","Early Preads B5","bCAPs",'bFAPLs')
+Idents(bat_cc) <- "bat_named_bclusters"
+```
+
+
+
+## 10. Find markers of each cluster
+```{r}
+#bat_cc <- SCTransform(bat_cc)
+bcaps_markers= FindMarkers(bat_cc_diet,'bCAPs') #for BAT
+bfapls_markers= FindMarkers(bat_cc_diet, 'bFAPLs')
+b1_markers = FindMarkers(bat_cc_diet, 'Early Preads B1')
+b2_markers= FindMarkers(bat_cc_diet, 'Early Preads B2')
+b3_markers= FindMarkers(bat_cc_diet, 'Early Preads B3')
+b4_markers= FindMarkers(bat_cc_diet, 'Early Preads B4')
+b5_markers= FindMarkers(bat_cc_diet, 'Early Preads B5')
+```
+
+Filter for top 10% markers
+```{r}
+b1_markers_filtered <- b1_markers %>%
+  filter(p_val_adj < 0.05 & pct.1>0.75)  %>%
+  arrange(desc(avg_log2FC)) %>%  # Sort wy avg_log2FC in descending order
+    slice_max(order_by = avg_log2FC, prop = 0.10) #alternatively take top 10% by L2FC   # Select the top 50 genes
+b2_markers_filtered <- b2_markers %>%
+  filter(p_val_adj < 0.05 & pct.1>0.75) %>%
+  arrange(desc(avg_log2FC)) %>%  
+    slice_max(order_by = avg_log2FC, prop = 0.10) #alternatively take top 10% by L2FC   
+b3_markers_filtered <- b3_markers %>%
+  filter(p_val_adj < 0.05 & pct.1>0.75) %>%
+  arrange(desc(avg_log2FC)) %>%  
+    slice_max(order_by = avg_log2FC, prop = 0.10) #alternatively take top 10% by L2FC   
+b4_markers_filtered <- b4_markers %>%
+  filter(p_val_adj < 0.05 & pct.1>0.75) %>%
+  arrange(desc(avg_log2FC)) %>%  
+    slice_max(order_by = avg_log2FC, prop = 0.10) #alternatively take top 10% by L2FC 
+b5_markers_filtered <- b5_markers %>%
+  filter(p_val_adj < 0.05 & pct.1>0.75) %>%
+  arrange(desc(avg_log2FC)) %>%  
+    slice_max(order_by = avg_log2FC, prop = 0.10) #alternatively take top 10% by L2FC   
+bcaps_markers_filtered <- bcaps_markers %>%
+  filter(p_val_adj < 0.05 & pct.1>0.5) %>%
+  arrange(desc(avg_log2FC)) %>%  
+    slice_max(order_by = avg_log2FC, prop = 0.10) #alternatively take top 10% by L2FC   
+bfapls_markers_filtered <- bfapls_markers %>%
+  filter(p_val_adj < 0.05 & pct.1>0.75) %>%
+  arrange(desc(avg_log2FC)) %>%  
+    slice_max(order_by = avg_log2FC, prop = 0.10) #alternatively take top 10% by L2FC   
+
+
+#extract just the name of genes
+bfapls_markers_list <-rownames(bfapls_markers_filtered)
+bcaps_markers_list <- rownames(bcaps_markers_filtered)
+bfapls_markers_list <- rownames(bfapls_markers_filtered)
+b1_markers_list <-rownames(b1_markers_filtered)
+b2_markers_list <- rownames(b2_markers_filtered)
+b3_markers_list <- rownames(b3_markers_filtered)
+b4_markers_list <- rownames(b4_markers_filtered)
+b5_markers_list <- rownames(b5_markers_filtered)
+
+#concatenate all significant markers into 1 single vector
+significant_markers_bat= c(b1_markers_list,b2_markers_list,b3_markers_list,b4_markers_list, b5_markers_list, bcaps_markers_list,bfapls_markers_list)
+```
+
+
+## 11. Export UMAP and metadata for RNA velocity analysis
+```{r}
+#export uMAP projections
+umap = cbind("Barcode" = rownames(Embeddings(object = bat_cc, reduction = "umap")), Embeddings(object = bat_cc, reduction = "umap"))
+write.table(umap, file="F:/uMAP_seurat.csv", sep = ",", quote = F, row.names = F, col.names = T)
+
+#export metadata to get clusters export
+write.csv(bat_cc@meta.data,"F:/seurat_metadata.csv") #use excel to extract barcodes and cluster names later
+
+```
+
+
+# B. Scenic analysis
+Here, we will be using the aucell score scenic output for bat, merging the matrix with the bat_cc object and perform DE expression for AUCell differential scores.
+
+## 1. Load in libraries
+```{r}
+library(Seurat)
+library(dplyr)
+```
+
+## 2. Load in data
+```{r}
+#bat <- readRDS('F:/new_analysis/labeled_analysis/bat.rds')
+aucell_scores <- read.csv("F:/scenic/bat/data/auc_mtx_v10.csv", row.names = 1)
+
+seurat_object=bat_cc_diet #set current object to be bat
+```
+
+## 3. Process the AUCell matrix
+```{r}
+# Cells should be columns, regulons should be rows
+if (!identical(colnames(aucell_scores), colnames(seurat_object))) {
+  aucell_scores <- t(aucell_scores)
+}
+# Set proper names if needed
+# Create a new assay object with AUCell scores
+aucell_assay <- CreateAssayObject(counts = aucell_scores)
+
+# Add this new assay to your Seurat object
+seurat_object[["AUCell"]] <- aucell_assay
+DefaultAssay(seurat_object) <- "AUCell"
+seurat_object<- ScaleData(seurat_object)
+```
+
+## 4. Find differential scores
+```{r}
+Idents(seurat_object) <- "bat_named_bclusters"
+bcaps_vs_bfapls_tcf <- FindMarkers(seurat_object, ident.1='bCAPs', ident.2='bFAPLs')
+bcaps_vs_bfapls_tcf_filtered <- bcaps_vs_bfapls_tcf %>%
+  filter(p_val_adj < 0.05 & avg_log2FC>0& pct.1>0.5)
+
+bcaps_tcf_list <- rownames(bcaps_vs_bfapls_tcf_filtered)
+
+bfapls_vs_bcaps_tcf <- FindMarkers(seurat_object, ident.1='bFAPLs', ident.2='bCAPs')
+bfapls_vs_bcaps_tcf_filtered <- bfapls_vs_bcaps_tcf %>%
+  filter(p_val_adj < 0.05 & avg_log2FC>0 & pct.1>0.5)
+bfapls_tcf_list <- rownames(bfapls_vs_bcaps_tcf_filtered)
+
+```
+
+## 5. Filter out TCF that shows erratic expressions
+```{r}
+#FINAL HEATMAPS 3.5.25
+bcaps_tcf_to_remove <- c('Stat5b...') #adipogenic
+bfapls_tcf_to_remove <- c('E2f2...','Hoxb2...','Irf8...','Gata3...','Rfxank...', 'Hoxb7...', 'Shox2...') #final list 3/5/25
+
+# Remove the genes from the list
+adipogenic_tcf= bcaps_tcf_list
+adipogenic_tcf_cleaned <- adipogenic_tcf[!adipogenic_tcf %in% bcaps_tcf_to_remove] 
+
+
+fibrogenic_tcf= bfapls_tcf_list
+fibrogenic_tcf_cleaned <- fibrogenic_tcf[!fibrogenic_tcf %in% bfapls_tcf_to_remove] 
+
+```
+
+## 6. subset data for heatmap plotting
+```{r}
+#extract the data matrix from seurat object
+data_matrix <- GetAssayData(object = seurat_object, assay = "AUCell", slot='scale.data') 
+#setting up the labels and colors
+cluster_labels <- seurat_object$bat_named_bclusters
+# Order data matrix by cluster labels
+ordered_indices <- order(cluster_labels)
+ordered_data_matrix <- data_matrix[, ordered_indices]
+ordered_cluster_labels <- cluster_labels[ordered_indices]
+# Create annotation data frame
+cluster_annotation <- data.frame(Cluster = factor(ordered_cluster_labels))
+
+#define color for each cluster
+cluster_colors<- setNames(c("#00868b", "#cd5b45", "#FFE300","#00BFFF","#00FFFF","#0000FF", "#FF0000"), sort(unique(cluster_labels)))
+# Create the annotation data frame
+cluster_annotation <- data.frame(Cluster = factor(ordered_cluster_labels, levels = names(cluster_colors)))
+
+
+#Set limits and breaks based on standard deviation
+# Calculate the standard deviation of the matrix
+std_dev <- sd(as.vector(data_matrix))
+# Define breaks around zero, within ±2 standard deviations
+max_limit <- 2 * std_dev
+breaks <- seq(-max_limit, max_limit, length.out = 101)
+```
+
+Select CAPs or FAPs heatmap
+```{r}
+regulon_activity_caps <- ordered_data_matrix[adipogenic_tcf_cleaned, ] #for CAPs heatmap
+regulon_activity_fapls <- ordered_data_matrix[fibrogenic_tcf_cleaned, ] # for FAPLs heatmap
+
+```
+
+Plot the heatmap
+```{r}
+pheatmap(regulon_activity_caps, #or regulon_activity_fapls
+         cluster_cols = TRUE,show_colnames = FALSE,
+         cluster_rows = TRUE,
+         scale = 'none',  # No scaling, to keep data as is
+         breaks=breaks,
+         annotation_col = cluster_annotation,
+         annotation_colors = list(Cluster = cluster_colors))
+```
+
+
+
+
+
+# FIGURE PLOTS
+
+Fig. EV1F- bat UMAP without non-adipocells, grouped by original clusterings
+```{r}
+#define color scheme
+bat_raw_colors= c("#00868b", "#cd5b45", "#FFE300","#00BFFF","#00FFFF","#0000FF", "#FF0000", '#e066ff','#7d26cd','#FF69B4')
+DimPlot(bat_nocc, reduction = "umap", cols=bat_raw_colors, group.by = "bat_unexcluded_clusters", pt.size=2)
+```
+
+Fig. EV1G- bat UMAP without non-adipocells before CC regression, grouped by CC Phase
+```{r}
+DimPlot(bat_nocc, reduction = "umap", group.by = "Phase", pt.size=2)
+```
+
+Fig. EV1H- bat cell cycle distribution pre-regression
+```{r}
+cell_counts <- table(bat_nocc$bat_unexcluded_clusters, bat_nocc$Phase)
+print(cell_counts)
+
+```
+
+Fig. EV1I - bat UMAP without non-adipocells after CC regression, grouped by CC Phase
+```{r}
+DimPlot(bat_cc, group.by='Phase', pt.size= 2)
+```
+
+Fig. EV1J - bat cell cycle distribution post-regression
+```{r}
+cell_counts <- table(bat_cc$bat_named_bclusters, bat_cc$Phase)
+print(cell_counts)
+```
+
+Fig. EV2B - heatmap of top 10% markers per cluster
+```{r}
+bat_colors= c("#00868b", "#cd5b45", "#FFE300","#00BFFF","#00FFFF","#0000FF", "#FF0000")
+DoHeatmap(bat_cc_diet, significant_markers_bat, group.colors= bat_colors)+ scale_fill_gradientn(colors = rev(RColorBrewer::brewer.pal(5, "RdBu")))
+```
+
+Fig. 1B Pre-exclusion UMAP of bat
+```{r}
+DimPlot(bat_unexcluded, cols = bat_raw_colors, pt.size=2, group.by="bat_unexcluded_clusters")
+```
+
+Fig. 1D Plot violin plots of adipocells and non-adipocell markers 
+```{r}
+#plot the violins for markers of non-adipocells
+Stacked_VlnPlot(bat_unexcluded, colors_use = bat_raw_colors, features= c("Myod1","Plp1",'Ptprc','Fabp4','Pparg','Dlk1','Pdgfra','Pdgfrb'), x_lab_rotate=45)
+
+```
+
+
+Fig. 1F - Final UMAP of bat clusters after non-adipocell exclusion and CC regression 
+```{r}
+bat_colors= c("#00868b", "#cd5b45", "#FFE300","#00BFFF","#00FFFF","#0000FF", "#FF0000") 
+DimPlot(bat_cc, cols= bat_colors, pt.size=2)
+```
+
+Fig. 1H - Stacked violin plots of prominent markers
+```{r}
+Stacked_VlnPlot(bat_cc, features=c("Pdgfra", "Pdgfrb", "Dlk1", "Pparg", "Fabp4", 'Sema3a','Nav3','Lrrc15','Cdca3','Kif20a','Creb5','Ptprz1','Igf1','Hp','Mecom','Serpinb1a','Cryab'), colors_use=bat_colors, x_lab_rotate = 45)
+
+```
+
+Fig. 3D Feature plots 
+```{r}
+DefaultAssay(bat_cc) <- 'RNA'
+FeaturePlot(bat_cc, "Crlf1", min.cutoff=0.5, max.cutoff = 2)
+FeaturePlot(bat_cc, "Cryab",min.cutoff=0.5, max.cutoff = 2)
+FeaturePlot(bat_cc, "Ptn",min.cutoff=1.5, max.cutoff = 3.5)
+FeaturePlot(bat_cc, "Ank3",min.cutoff=0.5, max.cutoff = 1.5)
+```
+
+
+Fig. 3F Regulon score patterns
+Top panel- CAPs enriched regulons
+```{r}
+pheatmap(regulon_activity_caps, 
+         cluster_cols = TRUE,show_colnames = FALSE,
+         cluster_rows = TRUE,
+         scale = 'none',  # No scaling, to keep data as is
+         breaks=breaks,
+         annotation_col = cluster_annotation,
+         annotation_colors = list(Cluster = cluster_colors))
+```
+bottom panel - FAPs enriched regulons
+```{r}
+pheatmap(regulon_activity_fapls, 
+         cluster_cols = TRUE,show_colnames = FALSE,
+         cluster_rows = TRUE,
+         scale = 'none',  # No scaling, to keep data as is
+         breaks=breaks,
+         annotation_col = cluster_annotation,
+         annotation_colors = list(Cluster = cluster_colors))
+```
+
+Table EV2 - bAPC markers
+```{r}
+write.csv(b1_markers, "b1_markers.csv")
+write.csv(b2_markers, "b2_markers.csv")
+write.csv(b3_markers, "b3_markers.csv")
+write.csv(b4_markers, "b4_markers.csv")
+write.csv(b5_markers, "b4_markers.csv")
+write.csv(bcaps_markers,"bcaps_markers.csv")
+write.csv(bfapls_markers, "bfapls_markers.csv")
+
+```
+
+Table EV4 - DEGs between bCAPs vs bFAPLs
+```{r}
+wcaps_wfapls_degs <- FindMarkers(bat_cc, ident.1='wCAPs', ident.2 = 'wFAPLs')
+write.csv(wcaps_wfapls_degs, file ="DEGs_wCAPs_vs_wFAPLs.csv")
+```
+
+#############################
+########END OF ANALYSIS######
+#############################
+
+save all objects for reproducibility
+```{r}
+bat_nocc$bat_unexcluded_clusters <- bat_unexcluded$bat_unexcluded_clusters
+bat_cc$bat_unexcluded_clusters <- bat_unexcluded$bat_unexcluded_clusters
+```
+
+```{r}
+wat_nocc$wat_unexcluded_clusters <- wat_unexcluded$wat_unexcluded_clusters
+wat_cc$wat_unexcluded_clusters <- wat_unexcluded$wat_unexcluded_clusters
+```
+
+```{r}
+wat_nocc_diet <- DietSeurat(object = wat_nocc,
+  layers =c("data", "scale.data") ,
+  assays=c("RNA", "AUCell", "SCT"),
+  data = TRUE,     # Keep the normalized data slot (for FeaturePlot)
+  counts = NULL,  # Discard raw counts to save space
+  scale.data = TRUE, # Discard scaled data to save space (unless you need it for specific reasons)
+  dimreducs = c("pca", "umap"), # Keep PCA and UMAP embeddings
+  graphs = FALSE, # Discard graphs (unless specific graph analysis is central to your paper)
+  misc = FALSE, # Discard misc slot (often not critical)
+)
+wat_nocc_diet[["RNA"]]["scale.data"] <- NULL
+wat_nocc_diet[["RNA"]]["counts"] <- NULL
+wat_nocc_diet[["SCT"]]["counts"] <- NULL
+wat_nocc_diet[["SCT"]]["scale.data"] <- NULL
+saveRDS(wat_nocc_diet, file="F:/new_analysis/scripts/publication/wat_nocc.rds")
+```
+
+```{r}
+seurat_object= wat_unexcluded
+
+Idents(seurat_object) = "wat_named_clusters"
+#new_cluster_ids <- c('APCs 1', 'APCs 2', "APCs 3", "APCs 4",'APCs 5', 'APCs 6', 'APCs 7',  "Myeloid cells", 'Glial cells' , 'Myoblasts')
+
+new_cluster_ids <- c('APCs 1', 'APCs 2', "APCs 3", "APCs 4",'APCs 5', 'APCs 6',  'Glial cells' , "Myeloid cells")
+
+names(new_cluster_ids) <- levels(seurat_object)
+seurat_object <- RenameIdents(seurat_object, new_cluster_ids)
+
+#create a new metadata column called "bat_unexcluded_clusters"
+#seurat_object@meta.data$bat_unexcluded_clusters <- as.factor(seurat_object@active.ident) 
+
+seurat_object@meta.data$wat_unexcluded_clusters <- as.factor(seurat_object@active.ident) 
+
+wat_unexcluded = seurat_object
+
+```
+

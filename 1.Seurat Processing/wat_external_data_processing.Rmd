@@ -1,0 +1,861 @@
+# WAT Reference mapping for external datasets
+
+This script will generate the following figures:
+Fig. 5A - Reference mapping of 5 datasets
+Fig. 5B - quantification of labeled cells from mapping
+Fig. EV6A - other paper's markers on our datasets
+Fig. EV6B - data for dot plots of shared FAPLs markers. final dot plot was plotted in Graphpad Prism.
+
+
+## Data downloaded links:
+Hepler- https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE111588
+Holman- https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE227441
+Sarvari- https://github.com/JesperGrud/snRNAseq_eWAT
+Emont- https://gitlab.com/rosen-lab/white-adipose-atlas
+Schwalie- https://github.com/DeplanckeLab/Areg
+
+
+# Part A- process external data
+
+### libraries
+```{r}
+library(Seurat)
+library(SeuratData)
+library(glmGampoi)
+library(Seurat.utils)
+library(scDblFinder)
+library(dittoSeq)
+library(pheatmap)
+library(gprofiler2)
+
+library(tximport)
+library(AnnotationHub)
+library(edgeR)
+library(AnnotationDbi)
+
+library(RColorBrewer)
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+```
+
+### EMONT DATASET
+```{r}
+Emont_WAT <- readRDS("//research.drive.wisc.edu/galmozzi/Galmozzi lab/Hoang/Projects/Adipocyte Subtypes/integrated_analysis/Emont_2022/mouse_ASPCs.rds")
+###########subseting only chow diet############
+Emont_chow <- subset(Emont_WAT, subset = diet == "Chow")
+Emont_chow <- SCTransform(Emont_chow)
+DefaultAssay(Emont_chow) <- "SCT"
+##################subsetting ING from chow diet################
+Emont_chow_ING <- subset(Emont_chow, subset = depot == "ING")
+Emont_chow_ING <- SCTransform(Emont_chow_ING)
+```
+
+
+### SAVARI DATASET
+```{r}
+Sarvari_WAT <- readRDS("//research.drive.wisc.edu/galmozzi/Galmozzi lab/Hoang/Projects/Adipocyte Subtypes/integrated_analysis/Sarvari/eWAT_FAP.Rds")
+#update seurat object
+Sarvari_WAT = UpdateSeuratObject(Sarvari_WAT)
+Sarvari_WAT@images <- list()
+```
+
+### HOLMAN DATASET
+```{r}
+###Processing Single Cell Dataset
+```{r eval=FALSE, include=FALSE}
+
+s.genes <- gorth(query = cc.genes.updated.2019$s.genes, source_organism = 'hsapiens', target_organism = 'mmusculus')[,5]
+g2m.genes <- gorth(query = cc.genes.updated.2019$g2m.genes, source_organism = 'hsapiens', target_organism = 'mmusculus')[,5]
+
+#YTN -v1 Cutoffs
+# Load the Filtered dataset and make percent mito, filter mito @10, nfeature @ 800 and 6000, variable features @ 6000 
+YTN.counts<- Read10X(data.dir = "F:/new_analysis/integrated_analysis/Holman/scrnaseq/YTN")
+YTN <- CreateSeuratObject(counts = YTN.counts, project = "YTN", min.cells = 3, min.features = 200) %>% 
+  PercentageFeatureSet( , pattern = "^mt-",col.name = "percent.mt") %>% 
+  subset( , subset = percent.mt < 10) %>% 
+  subset( , subset = nFeature_RNA > 800 & nFeature_RNA < 6000) %>% 
+  NormalizeData(, normalization.method = "LogNormalize", scale.factor = 10000) %>%
+  FindVariableFeatures(, selection.method = "vst", nfeatures = 6000) %>%
+  CellCycleScoring(, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+
+#Y3D -v1 Cutoffs
+# Load the Filtered dataset and make percent mito, filter mito @7.5, nfeature @ 900 and 5500, variable features @ 5000 
+Y3D.counts <- Read10X(data.dir = "F:/new_analysis/integrated_analysis/Holman/scrnaseq/Y3D")
+Y3D <- CreateSeuratObject(counts = Y3D.counts, project = "Y3D", min.cells = 3, min.features = 200) %>% PercentageFeatureSet(, pattern = "^mt-",col.name = "percent.mt") %>% subset(, subset = percent.mt < 7.5) %>% subset( , subset = nFeature_RNA > 900 & nFeature_RNA < 5500) %>% NormalizeData(, normalization.method = "LogNormalize", scale.factor = 10000) %>% FindVariableFeatures(, selection.method = "vst", nfeatures = 5500) %>% CellCycleScoring(, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+
+
+#Y14D -v1 Cutoffs
+# Load the Filtered dataset and make percent mito, filter mito @7.5, nfeature @ 700  and 5250 , variable features @  5250 (The original file did 5500 but I set it to 5250 since we hvae been using the feature max as the variable feature max cutoff)
+Y14D.counts <- Read10X(data.dir = "F:/new_analysis/integrated_analysis/Holman/scrnaseq/Y14D")
+Y14D <- CreateSeuratObject(counts = Y14D.counts, project = "Y14D", min.cells = 3, min.features = 200) %>% PercentageFeatureSet(, pattern = "^mt-",col.name = "percent.mt") %>% subset(, subset = percent.mt < 7.5) %>% subset( , subset = nFeature_RNA > 700 & nFeature_RNA < 5250) %>% NormalizeData(, normalization.method = "LogNormalize", scale.factor = 10000) %>% FindVariableFeatures(, selection.method = "vst", nfeatures = 5250) %>% CellCycleScoring(, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+
+
+
+#OldTN- v2 Cutoffs
+# Load the Filtered dataset and make percent mito, filter mito @15, nfeature @ 700 and 5100, variable features @ 5100 
+OTN.counts <- Read10X(data.dir = "F:/new_analysis/integrated_analysis/Holman/scrnaseq/OTN")
+OTN <- CreateSeuratObject(counts = OTN.counts, project = "OTN", min.cells = 3, min.features = 200) %>% PercentageFeatureSet(, pattern = "^mt-",col.name = "percent.mt") %>% subset(, subset = percent.mt < 15) %>% subset( , subset = nFeature_RNA > 700 & nFeature_RNA < 5100) %>% NormalizeData(, normalization.method = "LogNormalize", scale.factor = 10000) %>% FindVariableFeatures(, selection.method = "vst", nfeatures = 5100) %>% CellCycleScoring(, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+
+
+
+#Old3D- v2 Cutoffs
+# Load the Filtered dataset and make percent mito, filter mito @9.5, nfeature @ 650 and 4900, variable features @ 5100 
+O3D.counts <- Read10X(data.dir = "F:/new_analysis/integrated_analysis/Holman/scrnaseq/O3D")
+O3D <- CreateSeuratObject(counts = O3D.counts, project = "O3D", min.cells = 3, min.features = 200) %>% PercentageFeatureSet(, pattern = "^mt-",col.name = "percent.mt") %>% subset( , subset = percent.mt < 9.5) %>% subset( , subset = nFeature_RNA > 650 & nFeature_RNA < 4900) %>% NormalizeData( , normalization.method = "LogNormalize", scale.factor = 10000) %>% FindVariableFeatures(, selection.method = "vst", nfeatures = 4900) %>% CellCycleScoring( , s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+
+
+
+#Old14D- v3 Cutoffs - Use the Upper dataset for this (bottom cutoff is 1750)
+# Load the Filtered dataset and make percent mito, filter mito @10, nfeature @ 1750 and 5500, variable features @ 5500 
+O14D.counts <- Read10X(data.dir = "F:/new_analysis/integrated_analysis/Holman/scrnaseq/O14D")
+O14D <- CreateSeuratObject(counts = O14D.counts, project = "O14D", min.cells = 3, min.features = 200) %>% PercentageFeatureSet(, pattern = "^mt-",col.name = "percent.mt") %>% subset( , subset = percent.mt < 10) %>% subset( , subset = nFeature_RNA > 1750 & nFeature_RNA < 5500) %>% NormalizeData(, normalization.method = "LogNormalize", scale.factor = 10000) %>% FindVariableFeatures( , selection.method = "vst", nfeatures = 5500) %>% CellCycleScoring(, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+
+
+rm(YTN.counts,Y3D.counts,Y14D.counts,OTN.counts,O3D.counts,O14D.counts)
+
+#Now do the integration
+#From the documentation. https://satijalab.org/seurat/v3.0/integration.html
+#We then pass these anchors to the IntegrateData function, which returns a Seurat object.
+#The returned object will contain a new Assay, which holds an integrated (or ‘batch-corrected’) expression matrix for all cells, enabling them to be jointly analyzed.
+reference.list.all <- c(YTN,Y3D,Y14D,OTN,O3D,O14D)
+IWAT.anchors <- FindIntegrationAnchors(object.list = reference.list.all, dims = 1:30)
+
+#Now that we found the anchors, integrate the data.
+rm(YTN,Y3D,Y14D,OTN,O3D,O14D)
+IWAT.Integrated<-IntegrateData(anchorset = IWAT.anchors, dims = 1:30)
+
+#ScaleData - this is where we are doing all of the cc and mito regressing. I think this should work. As of 11/1/19 the regression variables are scored on each dataset individually (see above code). 
+DefaultAssay(IWAT.Integrated) <- "integrated"
+IWAT.Integrated_Scaled <- ScaleData(IWAT.Integrated, vars.to.regress = c("S.Score", "G2M.Score", "percent.mt"), verbose = FALSE)
+
+#Decided to go with resolution of 0.36 for this dataset based on the tests below
+IWAT.Integrated_Scaled2 <- IWAT.Integrated_Scaled %>%
+  RunPCA() %>%
+  RunUMAP(dims = 1:15, reduction = "pca", seed.use = 2) %>%
+  FindNeighbors(dims = 1:15, reduction = "pca") %>%
+  FindClusters(resolution = c(0.13))
+
+DimPlot(IWAT.Integrated_Scaled2, label = T, pt.size = 0.1, reduction = "umap")
+DimPlot(IWAT.Integrated_Scaled2, label = T, pt.size = 0.1, reduction = "umap", split.by = "seurat_clusters", ncol = 3)
+
+IWAT.Integrated_Scaled2$orig.ident <- IWAT.Integrated_Scaled2$old.ident %>% gsub(pattern = "O", replacement = "A")
+
+#Changing order of levels so that the graphs have samples in correct orders
+IWAT.Integrated_Scaled2$orig.ident <- factor(x = IWAT.Integrated_Scaled2$orig.ident, 
+                                             levels = c("YTN", "Y3D", "Y14D",
+                                                        "ATN", "A3D", "A14D"))
+#Renaming the names from previous column to new column
+IWAT.Integrated_Scaled2@meta.data$age <- IWAT.Integrated_Scaled2@meta.data$orig.ident %>%
+  gsub(pattern = "YTN", replacement = "Young") %>%
+  gsub(pattern = "Y3D", replacement = "Young") %>%
+  gsub(pattern = "Y14D", replacement = "Young") %>%
+  gsub(pattern = "ATN", replacement = "Aged") %>%
+  gsub(pattern = "A3D", replacement = "Aged") %>%
+  gsub(pattern = "A14D", replacement = "Aged") 
+
+IWAT.Integrated_Scaled2$Age <- factor(x = IWAT.Integrated_Scaled2$age, 
+                                      levels = c("Young", "Aged"))
+
+Idents(IWAT.Integrated_Scaled2)<-IWAT.Integrated_Scaled2$seurat_clusters
+table(IWAT.Integrated_Scaled2$seurat_clusters)
+IWAT.Integrated_Scaled2 <- RenameIdents(object = IWAT.Integrated_Scaled2,
+                                        "0" = "Dpp4+ Fibroblasts",
+                                        "1" = "Icam1+ Preadipocytes",
+                                        "2" = "Endothelial 1",
+                                        "3" = "Cd142+ Fibroblasts",
+                                        "4" = "SMCs/Pericytes",
+                                        "5" = "Endothelial 2",
+                                        "6" = "Immune cells",
+                                        "7" = "Spp1+ Fibroblasts",
+                                        "8" = "Dpp4+ Fibroblasts",
+                                        "9" = "Schwann cells")
+
+IWAT.Integrated_Scaled2$Named_clusters <- Idents(IWAT.Integrated_Scaled2)
+#Changing order of levels so that the graphs have samples in correct orders
+IWAT.Integrated_Scaled2$Named_clusters <- factor(x = IWAT.Integrated_Scaled2$Named_clusters, 
+                                                 levels = c("Dpp4+ Fibroblasts",
+                                                            "Icam1+ Preadipocytes",
+                                                            "Cd142+ Fibroblasts",
+                                                            "Spp1+ Fibroblasts",
+                                                            "Endothelial 1",
+                                                            "Endothelial 2",
+                                                            "SMCs/Pericytes",
+                                                            "Schwann cells",
+                                                            "Immune cells"))
+
+IWAT.Integrated_Scaled2@meta.data$Exposure_Days <- IWAT.Integrated_Scaled2@meta.data$orig.ident %>%
+  gsub(pattern = "YTN", replacement = "0 Days") %>%
+  gsub(pattern = "ATN", replacement = "0 Days") %>%
+  gsub(pattern = "Y3D", replacement = "3 Days") %>%
+  gsub(pattern = "A3D", replacement = "3 Days") %>%
+  gsub(pattern = "Y14D", replacement = "14 Days") %>%
+  gsub(pattern = "A14D", replacement = "14 Days")
+
+IWAT.Integrated_Scaled2$Exposure_Days <- factor(x = IWAT.Integrated_Scaled2$Exposure_Days, 
+                                                levels = c("0 Days",
+                                                           "3 Days",
+                                                           "14 Days"))
+
+IWAT.Integrated_Scaled2$Condition <- IWAT.Integrated_Scaled2$Exposure_Days %>% 
+  gsub(pattern = "0 Days", replacement = "TN") %>%
+  gsub(pattern = "3 Days", replacement = "3 Days") %>%
+  gsub(pattern = "14 Days", replacement = "14 Days")
+
+IWAT.Integrated_Scaled2$Condition <- factor(x = IWAT.Integrated_Scaled2$Condition, 
+                                            levels = c("TN",
+                                                       "3 Days",
+                                                       "14 Days"))
+
+DimPlot(IWAT.Integrated_Scaled2, reduction = "umap", split.by = "Named_clusters",  label=FALSE, ncol = 3, pt.size = 0.1)
+
+#upon rerunning the algorithm, the labeling are wrong.
+#I matched identity with paper as below
+IWAT.Integrated_Scaled2 <- RenameIdents(object = IWAT.Integrated_Scaled2,
+                                        "0" = "Dpp4+ Fibroblasts",
+                                        "1" = "Icam1+ Preadipocytes",
+                                        "2" = "Cd142+ Fibroblasts",
+                                        "3" = "Endothelial 1",
+                                        "4" = "SMCs/Pericytes",
+                                        "5" = "Endothelial 2",
+                                        "6" = "Immune cells",
+                                        "7" = "Spp1+ Fibroblasts",
+                                        "8" = "Dpp4+ Fibroblasts",
+                                        "9" = "Schwann cells")
+IWAT.Integrated_Scaled2$Named_clusters <- Idents(IWAT.Integrated_Scaled2)
+pread_names = c("Spp1+ Fibroblasts", "Dpp4+ Fibroblasts","Icam1+ Preadipocytes","Cd142+ Fibroblasts")
+Stacked_VlnPlot(IWAT.Integrated_Scaled2, idents=pread_names, features = c('Cryab', 'Meox2','Gdf10', 'Fn1', 'Serpinb1a', 'Col4a1','Col4a2', 'Nr2f2', 'Fabp4','Pparg'), x_lab_rotate=T, split.by='Age')
+```
+
+### SCHWALIE DATASET
+Below is a general outline for attaching your new cluster annotation to the old SCESet object (mysceset) and then converting everything into a Seurat object. Since SCESet is from an older version of scater, we’ll do the following:
+
+Read in the cluster-annotation file (the two-column file of barcode and cluster ID).
+Merge that annotation into the phenoData (pData(mysceset)).
+Create a Seurat object from the raw (or normalized) data stored in mysceset.
+
+mysceset was provided in the downloadable 
+
+https://github.com/DeplanckeLab/Areg/blob/master/data/mASC10x-allData-NoXistKrt-review-FF.1000genecut.SC3.scran.2.RData
+https://github.com/DeplanckeLab/Areg/blob/master/data/mASC10x-allData-NoXistKrt-review-FF.bam-DGE.4000.fil.1000genes10DGE2Cells.clusters.k4.txt
+```{r}
+# 1) Read the file
+cluster_anno <- read.table("R:/Galmozzi lab/Hoang/Projects/Adipocyte Subtypes/integrated_analysis/schwalie/reconstructed_seurat_from_rdata/mASC10x-allData-NoXistKrt-review-FF.bam-DGE.4000.fil.1000genes10DGE2Cells.clusters.k4.txt", 
+                           header = FALSE,   # or TRUE if there's a header
+                           sep = "\t",
+                           stringsAsFactors = FALSE)
+
+colnames(cluster_anno) <- c("Barcode", "Cluster")
+
+# 2) Turn this into a named vector, so that names = cell barcodes
+cluster_vec <- setNames(cluster_anno$Cluster, cluster_anno$Barcode)
+
+# 3) Attach to pData(mysceset)
+# pData(mysceset) returns a data.frame with rownames = cell barcodes
+pd <- mysceset@phenoData@data
+
+# (Optional) Check for matching barcodes. The older scater appends "-1" sometimes. 
+# Usually rownames(pd) already match e.g. 'AAACCTGGTCAGATAA-1'. 
+# If they differ, you may need to remove or add the trailing "-1".
+
+pd$NewCluster <- cluster_vec[rownames(pd)]
+mysceset@phenoData@data <- pd
+
+# Verify the new column
+mysceset@phenoData@data$NewCluster
+mysceset@phenoData@data$sc3_4_clusters
+mysceset@phenoData@data$NewCluster==mysceset@phenoData@data$sc3_4_clusters
+
+
+
+#CREATE THE SEURAT OBJECT
+library(Seurat)
+
+
+norm_mat <- mysceset@assayData$counts  # actually normalized, not raw
+cell_md  <- mysceset@phenoData@data   # cell metadata
+
+#map in gene symbol
+# 1) Read in genes.tsv
+genes <- read.table("R:/Galmozzi lab/Hoang/Projects/Adipocyte Subtypes/integrated_analysis/schwalie/mASC1-singlecells-10x-cellRanger/filtered_gene_bc_matrices/mm10/genes.tsv",
+                    header = FALSE,   # or TRUE if there's a header row
+                    sep = "\t",
+                    stringsAsFactors = FALSE)
+colnames(genes) <- c("Ensembl", "Symbol")
+# 3) Create a named vector for lookups:
+#    names(...) = Ensembl ID, values = Symbol
+ens_to_sym <- setNames(genes$Symbol, genes$Ensembl)
+clean_ensembl_ids <- sub("\\.[0-9]+$", "", rownames(schwalie))
+mapped_symbols <- ens_to_sym[clean_ensembl_ids]
+
+#rename seurat's row names to gene symbols
+rownames(counts_mat) <- mapped_symbols
+
+
+
+schwalie <- CreateSeuratObject(counts = counts_mat, meta.data = cell_md)
+
+schwalie <- SCTransform(schwalie)
+
+Idents(schwalie) <- "NewCluster"
+
+new_cluster_ids = c("G3","G4","G1","G2")
+names(new_cluster_ids) <- levels(schwalie)
+
+#rename idents
+schwalie <- RenameIdents(schwalie, new_cluster_ids)
+schwalie@meta.data$schwalie_clusters <- as.factor(schwalie@active.ident)
+```
+
+### HEPLER DATASET
+code unavailable, so process with regular workflow and what i can find from methods.
+```{r}
+#read in data
+gupta.data = Read10X(data.dir = "F:/new_analysis/integrated_analysis/Gupta/GSE111588_RAW")
+
+#convert into seurat object
+gupta = CreateSeuratObject(counts = gupta.data, project = "hepler", min.cells = 3, min.features = 200)
+gupta$data.set = rep("gupta", length(gupta$orig.ident))
+
+#calculate percent mitochondrial RNA for guptapreads
+gupta[["percent.mt"]] = PercentageFeatureSet(gupta, pattern = "^mt-")
+gupta[["percent.mt"]] = PercentageFeatureSet(gupta, pattern = "^MT-")
+
+gupta[["percent.ribo"]] <- PercentageFeatureSet(gupta, pattern="^rps")
+
+
+gupta[["percent.ribo"]] <- PercentageFeatureSet(gupta, features = ribo.genes)
+####################end##########
+#generate violin plot #genes/cell, mtRNA/cell, reads/cell
+VlnPlot(gupta, features= c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"), pt.size=0.5, ncol = 3)
+#rerun without the dots
+VlnPlot(gupta, features= c("nFeature_RNA", "nCount_RNA", "percent.mt"), pt.size=0, ncol = 3)
+
+#Feature Scatter visualize feature-feature relationships, but can be used
+# for anything calculated by the object, i.e. columns in object metadata, PC scores etc.
+plot1 <- FeatureScatter(gupta, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(gupta, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot1 + plot2
+
+
+
+#apply filter-- UMI 6000-60000, features 3900-7700, mito umi 1.7-5
+gupta <- subset(gupta, subset = nFeature_RNA > 200 & nFeature_RNA < 6500 & percent.mt < 20) #& percent.ribo > 5)
+gupta<- UpdateSeuratObject(gupta)
+#apply filter tdTomato=0 and EGFP>0
+gupta <- subset(gupta, subset = tdTomato < 1 & EGFP > 0)
+
+
+#normalizing the data -normalizes the feature expression measurements for each cell by the total expression, multiplies this by a scale factor (10,000 by default), and log-transforms the result
+gupta <- NormalizeData(gupta, normalization.method = "LogNormalize", scale.factor = 10000)
+
+#identification of highly variable features
+gupta <- FindVariableFeatures(gupta, selection.method = "vst", nfeatures = 2000)
+
+#Identify the 10 most highly variable genes
+top10 <- head(VariableFeatures(gupta), 10)
+top10
+# plot variable features with and without labels
+plot1 <- VariableFeaturePlot(wat)
+plot2 <- LabelPoints(plot = plot1, points = top10, repel = TRUE)
+plot1 + plot2
+
+#scaling the data -pre-processing step prior to dimensional reduction techniques like PCA. The ScaleData() function:
+#Shifts the expression of each gene, so that the mean expression across cells is 0
+#Scales the expression of each gene, so that the variance across cells is 1
+#This step gives equal weight in downstream analyses, so that highly-expressed genes do not dominate
+#The results of this are stored in pbmc[["RNA"]]@scale.data 
+all.genes <- rownames(gupta)
+gupta <- ScaleData(gupta, features = all.genes)
+
+gupta <-SCTransform(gupta)
+
+
+
+#PCA
+gupta <- RunPCA(gupta, features = VariableFeatures(object = gupta))
+
+#determine dimensionality
+ElbowPlot(gupta, ndims = 50, reduction = "pca")
+gupta <- JackStraw(gupta, num.replicate=100)
+gupta <- ScoreJackStraw(gupta, dims = 1:20)
+JackStrawPlot(gupta, dims = 1:15)
+
+#clustering
+gupta <- FindNeighbors(gupta, dims = 1:10)
+gupta <- FindClusters(gupta, resolution = 0.1)
+
+#umap
+gupta <- RunUMAP(gupta, dims = 1:10)
+DimPlot(gupta)
+
+gupta.markers <-FindAllMarkers(gupta)
+write.csv(gupta.markers, file="F:/new_analysis/integrated_analysis/Gupta/Zhang2020/gupta.markers.csv")
+#Markers violin plot
+#1. APC
+VlnPlot(gupta,features="Agt")
+VlnPlot(gupta,features="Apoe")
+VlnPlot(gupta, features= "Fndc5")
+VlnPlot(gupta, features= "Lrrn1")
+VlnPlot(gupta, features= "Adipoq")
+VlnPlot(gupta, features="Ly6c1")
+VlnPlot(gupta, features="Pdgfrb")
+VlnPlot(gupta, features="Pdgfra")
+VlnPlot(gupta, features="Cxcl14")
+VlnPlot(gupta, features= "Fabp4")
+VlnPlot(gupta, features= "Mfap5")
+VlnPlot(gupta, features= "Msln")
+VlnPlot(gupta, features= "Steap4")
+VlnPlot(gupta, features= "Lrrn4")
+VlnPlot(gupta, features= "Acta2")
+
+# Calculate average expression
+avg_expression <- AverageExpression(gupta, return.seurat = TRUE)
+
+# Retrieve the data frame of averages (assuming you're using the RNA assay)
+avg_exp_df <- avg_expression$RNA@meta.data
+
+# Sort by average expression, descending
+top_genes <- avg_exp_df %>% 
+  rownames_to_column("gene") %>% 
+  arrange(desc(avg_expr))
+
+# View the top expressed genes
+head(top_genes)
+
+
+
+
+#renaming clusters
+new_cluster_names <- c("0" = "Adipocyte Progenitor Cells",
+                       "1" = "Fibroinflammatory Progenitors",
+                       "2" = "Myeloid Cells",
+                       "3" = "Mesothelial-like Cells")
+
+# Rename clusters in the metadata
+gupta <- RenameIdents(gupta, new_cluster_names)
+Idents(gupta.preads) <- seurat_object$new_metadata_column
+
+#########################################################
+###############SUBSETTING ONLY ADIPOCELLS################
+#########################################################
+
+
+gupta.preads <-subset(gupta, idents=c("Myeloid Cells", "Mesothelial-like Cells"), invert=TRUE)
+gupta.preads <- SCTransform(gupta.preads)
+
+#change names of clusters to "B"+number
+gupta.preads@meta.data$gupta_clusters <- as.factor(gupta.preads@active.ident)
+
+#PCA
+gupta.preads <- RunPCA(gupta.preads, features = VariableFeatures(object = gupta.preads))
+
+#determine dimensionality
+ElbowPlot(gupta.preads, ndims = 50, reduction = "pca")
+gupta.preads <- JackStraw(gupta.preads, num.replicate=100)
+gupta.preads <- ScoreJackStraw(gupta.preads, dims = 1:20)
+JackStrawPlot(gupta.preads, dims = 1:15)
+
+#clustering
+gupta.preads <- FindNeighbors(gupta.preads, dims = 1:10)
+gupta.preads <- FindClusters(gupta.preads, resolution = 0.15)
+
+#umap
+gupta.preads <- RunUMAP(gupta.preads, dims = 1:10)
+DimPlot(gupta.preads)
+```
+
+# Part B. Perform reference mapping
+
+###################
+#Reference mapping#
+###################
+## Load in WAT data
+```{r}
+wat <- readRDS('PATH/TO/wat_cc.rds') #this paper's wat_cc object
+#if object already loaded, just change their name
+wat<- wat_cc
+```
+
+## renames objects from above
+```{r}
+emont= Emont_chow_ING
+sarvari=Sarvari_WAT
+hepler= gupta.preads
+holman= IWAT.Integrated_Scaled2
+schwalie= schwalie
+
+```
+
+## Figure 5A WAT reference mapping, along with their counts for Fig. 5B
+
+### Reference mapping for sarvari dataset
+```{r}
+#I reconstructed the sarvari cells in a new object instead due to outdated dataset
+new_sarvari <- SCTransform(sarvari)
+wat_cc <- RunUMAP(wat_cc, dims=1:10, return.model = TRUE) #have to return the model to run mapping
+wat_cc <- RunUMAP(wat_cc, dims=1:10, return.model = TRUE) 
+
+wat_colors=c('#00cd66','#fcd589','#cd6600', '#ff3030','#8c510a','#5ab4ac','#01665e')
+#Sarvari cells
+DefaultAssay(wat) <-'SCT'
+anchors <- FindTransferAnchors(
+  reference = wat,
+  query = new_sarvari,
+  normalization.method = "SCT",
+  reference.reduction = "pca",
+  dims = 1:50
+)
+#836 anchors
+wat_ref <- MapQuery(
+  anchorset = anchors,
+  query = new_sarvari,
+  reference = wat,
+  refdata = list(
+    wat_wclusters= 'wat_named_wclusters'
+  ),
+  reference.reduction = "pca", 
+  reduction.model = "umap"
+)
+
+DimPlot(wat_ref, reduction='ref.umap', group.by= 'predicted.wat_wclusters') 
+DimPlot(wat_ref, reduction='ref.umap')
+
+#counting
+results <- data.frame()  # Initialize an empty data frame to store results
+
+for (cluster in unique(wat_ref$predicted.wat_wclusters)) {
+  # Get counts for each category within the current cluster
+  fap_counts <- table(wat_ref$Subtype[wat_ref$predicted.wat_wclusters == cluster])
+  
+  # Combine the counts into a temporary data frame
+  temp_df <- data.frame(
+    predicted_cell_type = cluster,
+    query_cells = names(fap_counts),
+    count = as.integer(fap_counts)
+  )
+  
+  # Append to the results data frame
+  results <- rbind(results, temp_df)
+}
+
+#FIG 5B Sarvari
+cell_counts <- table(wat_ref$Subtype, wat_ref$predicted.wat_wclusters)
+
+write.csv(results, "R:/Galmozzi lab/Hoang/Projects/Adipocyte Subtypes/integrated_analysis/Reference_mapping/sarvari_ref_counts.csv")
+write.csv(results, "F:/new_analysis/labeled_analysis/reference_mapping_rds/sarvari_ref_counts.csv") #counts
+write.csv(cell_counts, "F:/new_analysis/labeled_analysis/reference_mapping_rds/sarvari_ref_counts2.csv")
+
+saveRDS(wat_ref, "F:/new_analysis/labeled_analysis/reference_mapping_rds/mapped_sarvari.rds") 
+#plotting on the reference UMAP
+reference= wat
+query=new_sarvari
+reference <- DietSeurat(reference, counts = FALSE, dimreducs = c("umap"))
+
+query <- DietSeurat(wat_ref, counts = FALSE, dimreducs = c("ref.umap"))
+
+
+#merge reference and query
+reference$id <- 'reference'
+query$id <- 'query'
+refquery <- merge(reference, query)
+refquery[["umap"]] <- merge(reference[["umap"]], query[["ref.umap"]])
+#refquery <- RunUMAP(refquery, reduction = 'pca', dims = 1:50)
+
+sarvari_colors=c("#a6611a","purple","red","#018571")
+
+#Fig 5A Sarvari 
+#DimPlot(refquery, group.by = 'id', shuffle = TRUE, pt.size=3)
+DimPlot(refquery, group.by='Subtype', pt.size = 3, cols=sarvari_colors, na.value='lightgrey')
+
+DimPlot(refquery, group.by='predicted.wat_wclusters', cols = c('#fcd589','#ff3030','#8c510a','#5ab4ac'), na.value="lightgrey", pt.size=3)
+
+saveRDS(refquery, "F:/new_analysis/labeled_analysis/reference_mapping_rds/mapped_sarvari_merged_umap.rds")
+```
+
+
+### Reference mapping for Hepler dataset
+```{r}
+#Hepler cells
+hepler <- readRDS("F:/new_analysis/integrated_analysis/Gupta/GSE111588_RAW/gupta.preads.rds")
+hepler_anchors <- FindTransferAnchors(
+  reference = wat,
+  query = hepler,
+  normalization.method = "SCT",
+  reference.reduction = "pca",
+  dims = 1:50
+) #373 anchors
+
+wat_ref_hepler <- MapQuery(
+  anchorset = hepler_anchors,
+  query = hepler,
+  reference = wat,
+  refdata = list(
+    wat_wclusters= 'wat_named_wclusters'
+  ),
+  reference.reduction = "pca", 
+  reduction.model = "umap"
+)
+DimPlot(wat_ref_hepler, reduction='ref.umap', group.by= 'predicted.wat_wclusters')
+DimPlot(wat_ref_hepler, reduction='ref.umap') 
+
+#counting
+results <- data.frame()  # Initialize an empty data frame to store results
+
+for (cluster in unique(wat_ref_hepler$predicted.wat_wclusters)) {
+  # Get counts for each category within the current cluster
+  cellcounts <- table(wat_ref_hepler$gupta_clusters[wat_ref_hepler$predicted.wat_wclusters == cluster])
+  
+  # Combine the counts into a temporary data frame
+  temp_df <- data.frame(
+    predicted_cell_type = cluster,
+    query_cells = names(cellcounts),
+    count = as.integer(cellcounts)
+  )
+  
+  # Append to the results data frame
+  results <- rbind(results, temp_df)
+}
+# FIG 5B hepler
+cell_counts <- table(wat_ref_hepler$gupta_clusters, wat_ref_hepler$predicted.wat_wclusters)
+
+write.csv(results, "R:/Galmozzi lab/Hoang/Projects/Adipocyte Subtypes/integrated_analysis/Reference_mapping/hepler_ref_counts.csv")
+write.csv(results, "F:/new_analysis/labeled_analysis/reference_mapping_rds/hepler_ref_counts.csv")
+write.csv(cell_counts, "F:/new_analysis/labeled_analysis/reference_mapping_rds/hepler_ref_counts2.csv" )
+
+saveRDS(wat_ref_hepler, "F:/new_analysis/labeled_analysis/reference_mapping_rds/mapped_hepler.rds") 
+#plotting on the reference UMAP
+reference= wat
+query= hepler
+reference <- DietSeurat(reference, counts = FALSE, dimreducs = c("umap"))
+
+query <- DietSeurat(wat_ref_hepler, counts = FALSE, dimreducs = c("ref.umap"))
+
+
+#merge reference and query
+reference$id <- 'reference'
+query$id <- 'query'
+refquery <- merge(reference, query)
+refquery[["umap"]] <- merge(reference[["umap"]], query[["ref.umap"]])
+hepler_colors = c('#4dac26','#d01c8b')
+#refquery <- RunUMAP(refquery, reduction = 'pca', dims = 1:50)
+DimPlot(refquery, group.by = 'id', shuffle = TRUE)
+
+#FIG 5A Hepler
+DimPlot(refquery, group.by='gupta_clusters', pt.size = 3, cols=hepler_colors, na.value='lightgrey')
+
+DimPlot(refquery, group.by='predicted.wat_wclusters', cols = c('#00cd66','#fcd589','#8c510a','#5ab4ac'), pt.size=3)
+#setting the right order
+refquery <-SetIdent(refquery, value='predicted.wat_wclusters')
+my_levels<- c('Early Preads W1', "Early Preads W2", "Early Preads W3", "wCAPs",'wFAPLs', 'Differentiating wFAPLs')
+Idents(refquery) <- factor(Idents(refquery), levels=my_levels)
+
+DimPlot(refquery, pt.size=3, group.by='predicted.wat_wclusters', cols=c("#01665e","#00cd66", "#cd6600", "#8c510a", "#5ab4ac"), na.value='lightgrey')
+
+
+saveRDS(refquery, "F:/new_analysis/labeled_analysis/reference_mapping_rds/mapped_hepler_merged_umap.rds")
+```
+
+### Reference mapping for Emont dataset
+```{r}
+#emont cells
+Emont_chow_ING <- readRDS("F:/new_analysis/seurat_objects/Emont_chow_ING.rds")
+emont_anchors <- FindTransferAnchors(
+  reference = wat,
+  query = Emont_chow_ING,
+  normalization.method = "SCT",
+  reference.reduction = "pca",
+  dims = 1:50
+) #1246 anchors
+
+wat_ref_emont <- MapQuery(
+  anchorset = emont_anchors,
+  query = Emont_chow_ING,
+  reference = wat,
+  refdata = list(
+    wat_wclusters= 'wat_named_wclusters'
+  ),
+  reference.reduction = "pca", 
+  reduction.model = "umap"
+)
+DimPlot(wat_ref_emont, reduction='ref.umap', group.by= 'predicted.wat_wclusters')
+DimPlot(wat_ref_emont, reduction='ref.umap', group.by='cell_type')
+
+#counting
+results <- data.frame()  # Initialize an empty data frame to store results
+
+for (cluster in unique(wat_ref_emont$predicted.wat_wclusters)) {
+  # Get counts for each category within the current cluster
+  cellcounts <- table(wat_ref_emont$cell_type[wat_ref_emont$predicted.wat_wclusters == cluster])
+  
+  # Combine the counts into a temporary data frame
+  temp_df <- data.frame(
+    predicted_cell_type = cluster,
+    query_cells = names(cellcounts),
+    count = as.integer(cellcounts)
+  )
+  
+  # Append to the results data frame
+  results <- rbind(results, temp_df)
+}
+
+cell_counts <- table(wat_ref_emont$cell_type, wat_ref_emont$predicted.wat_wclusters)
+
+write.csv(results, "R:/Galmozzi lab/Hoang/Projects/Adipocyte Subtypes/integrated_analysis/Reference_mapping/emont_ref_counts.csv")
+write.csv(results, "F:/new_analysis/labeled_analysis/reference_mapping_rds/emont_ref_counts.csv")
+write.csv(cell_counts, "F:/new_analysis/labeled_analysis/reference_mapping_rds/emont_ref_counts2.csv")
+
+saveRDS(wat_ref_emont,  "F:/new_analysis/labeled_analysis/reference_mapping_rds/mapped_emont.rds")
+
+#merge reference and query
+reference=wat
+query=wat_ref_emont
+
+reference <- DietSeurat(reference, counts = FALSE, dimreducs = c("umap"))
+
+query <- DietSeurat(wat_ref_emont, counts = FALSE, dimreducs = c("ref.umap"))
+
+reference$id <- 'reference'
+query$id <- 'query'
+refquery <- merge(reference, query)
+refquery[["umap"]] <- merge(reference[["umap"]], query[["ref.umap"]])
+#refquery <- RunUMAP(refquery, reduction = 'pca', dims = 1:50)
+DimPlot(refquery, group.by = 'id', shuffle = TRUE)
+
+emont_colors= c('#e66101', '#5e3c99','hotpink','blue','tomato4','red')
+DimPlot(refquery, group.by='cell_type', pt.size = 3, cols=emont_colors, na.value='lightgrey') + NoLegend()
+
+DimPlot(refquery, group.by='predicted.wat_wclusters', cols = c('#00cd66','#fcd589','#8c510a','#5ab4ac'), pt.size=1.5)
+
+
+DimPlot(refquery, pt.size=3, group.by='predicted.wat_wclusters', cols=c("#00cd66", "#fcd589", "#cd6600","#ff3030", "#8c510a", "#5ab4ac" ,"#01665e"), na.value = 'lightgrey')
+        
+        
+saveRDS(refquery, "F:/new_analysis/labeled_analysis/reference_mapping_rds/mapped_emont_merged_umap.rds")
+```
+
+
+### Reference mapping for Schwalie dataset
+```{r}
+#SCHWALIE CELLS
+schwalie <- readRDS("F:/new_analysis/labeled_analysis/schwalie.rds")
+
+
+DefaultAssay(wat) <-'SCT'
+anchors <- FindTransferAnchors(
+  reference = wat,
+  query = schwalie,
+  normalization.method = "SCT",
+  reference.reduction = "pca",
+  dims = 1:50
+)
+#442 anchors
+wat_ref_schwalie <- MapQuery(
+  anchorset = anchors,
+  query = schwalie,
+  reference = wat,
+  refdata = list(
+    wat_wclusters= 'wat_named_wclusters'
+  ),
+  reference.reduction = "pca", 
+  reduction.model = "umap"
+)
+
+DimPlot(wat_ref_schwalie, reduction='ref.umap', group.by= 'predicted.wat_wclusters')
+DimPlot(wat_ref_schwalie, reduction='ref.umap')
+
+#counting
+results <- data.frame()  # Initialize an empty data frame to store results
+
+for (cluster in unique(wat_ref_schwalie$predicted.wat_wclusters)) {
+  # Get counts for each category within the current cluster
+  fap_counts <- table(wat_ref_schwalie$schwalie_clusters[wat_ref_schwalie$predicted.wat_wclusters == cluster])
+  
+  # Combine the counts into a temporary data frame
+  temp_df <- data.frame(
+    predicted_cell_type = cluster,
+    query_cells = names(fap_counts),
+    count = as.integer(fap_counts)
+  )
+  
+  # Append to the results data frame
+  results <- rbind(results, temp_df)
+}
+
+#Fig. 5B schwalie
+cell_counts <- table(wat_ref_schwalie$schwalie_clusters, wat_ref_schwalie$predicted.wat_wclusters)
+
+write.csv(results, "R:/Galmozzi lab/Hoang/Projects/Adipocyte Subtypes/integrated_analysis/Reference_mapping/sarvari_ref_counts.csv")
+write.csv(results, "F:/new_analysis/labeled_analysis/reference_mapping_rds/schwalie_ref_counts.csv") #counts
+write.csv(cell_counts, "F:/new_analysis/labeled_analysis/reference_mapping_rds/schwalie_ref_counts2.csv")
+
+saveRDS(wat_ref_schwalie, "F:/new_analysis/labeled_analysis/reference_mapping_rds/mapped_schwalie.rds") 
+#plotting on the reference UMAP
+reference= wat
+query= wat_ref_schwalie
+reference <- DietSeurat(reference, counts = FALSE, dimreducs = c("umap"))
+
+query <- DietSeurat(query, counts = FALSE, dimreducs = c("ref.umap"))
+
+
+#merge reference and query
+reference$id <- 'reference'
+query$id <- 'query'
+refquery <- merge(reference, query)
+refquery[["umap"]] <- merge(reference[["umap"]], query[["ref.umap"]])
+#refquery <- RunUMAP(refquery, reduction = 'pca', dims = 1:50)
+
+schwalie_colors=c("red","green","blue","purple")
+
+DimPlot(refquery, group.by = 'id', shuffle = TRUE, pt.size=3)
+
+#FIG. 5A Schwalie
+DimPlot(refquery, group.by='schwalie_clusters', pt.size = 3, cols=schwalie_colors, na.value='lightgrey') + NoLegend()
+
+DimPlot(refquery, group.by='predicted.wat_wclusters', cols = c('#00cd66','#fcd589','#8c510a','#5ab4ac'), na.value="lightgrey", pt.size=3) + NoLegend()
+
+saveRDS(refquery, "F:/new_analysis/labeled_analysis/reference_mapping_rds/mapped_schwalie_merged_umap.rds")
+```
+
+## Fig. EV6A - Violin plots of other peoples markers
+```{r}
+wat_colors=c('#00cd66','#fcd589','#cd6600', '#ff3030','#8c510a','#5ab4ac','#01665e')
+Stacked_VlnPlot(wat, features= c"Ddp4", "Icam1", "Cd142", "Abcg1", "Klf4", "Foxop2", group.by= 'wat_named_wclusters', cols=wat_colors)
+```
+
+## Fig. EV5B - Dot plots of other people's FAPLs markers and ours
+plot data will be extracted and plotted in GraphPad Prism
+```{r}
+faps_list= c('Fn1','Fgf18','Ccn2','Ly6c1','Has2','Mfap5','Creb5','Mustn1','Tgfb2','Thy1','Igfbp6','Timp2','Cd9','Dkk3','Mgp','Gdf10','Meox2','Serping1','Nr2f2','Cxcl12','Cav1','Tmeff2','Tmem176a','Mgst3','Cryab','Cd81','Cpe','Shox2','Pid1','Fgf7','Il17d','Sdc2','Hspb2','Dcn','Tspan17','S100a4','Usp53','Naalad2','Osr1','Cisd1','Dock9','Id4','Rgs16','Med8','Prdm6','Abcc9','Sorbs1','Crim1','Galnt18','Lama2','Col14a1','Lum','Lamb2','Actn1','Epha3','Angpt2','Fstl3','Anxa3')
+
+#schwalie dotplot
+schwalie_dotplot <- DotPlot_scCustom(schwalie, faps_list, colors_use = rdbu, cols="RdBu", cluster.idents = T, x_lab_rotate=T, scale=T, dot.scale=10)
+schwalie_dotplot_data <- dotplot_obj$data
+write.csv(dotplot_data, "schwalie_dotplot_data.csv")
+
+
+#hepler dotplot
+hepler_dotplot <- DotPlot_scCustom(hepler, faps_list, colors_use = rdbu, cols="RdBu", cluster.idents = T, x_lab_rotate=T, scale=T, dot.scale=10)
+hepler_dotplot_data <- dotplot_obj$data
+write.csv(dotplot_data, "hepler_dotplot_data.csv")
+
+#emont dotplot
+emont_dotplot <- DotPlot_scCustom(emont, faps_list, colors_use = rdbu, cols="RdBu", cluster.idents = T, x_lab_rotate=T, scale=T, dot.scale=10)
+emont_dotplot_data <- dotplot_obj$data
+write.csv(dotplot_data, "emont_dotplot_data.csv")
+
+#sarvari dotplot
+sarvari_dotplot <- DotPlot_scCustom(sarvari, faps_list, colors_use = rdbu, cols="RdBu", cluster.idents = T, x_lab_rotate=T, scale=T, dot.scale=10)
+sarvari_dotplot_data <- dotplot_obj$data
+write.csv(dotplot_data, "sarvari_dotplot_data.csv")
+
+#holman dotplot
+holman_dotplot <- DotPlot_scCustom(holman, faps_list, colors_use = rdbu, cols="RdBu", cluster.idents = T, x_lab_rotate=T, scale=T, dot.scale=10)
+holman_dotplot_data <- dotplot_obj$data
+write.csv(dotplot_data, "holman_dotplot_data.csv")
+
+#bui dotplot
+wat_dotplot <- DotPlot_scCustom(wat, faps_list, colors_use = rdbu, cols="RdBu", cluster.idents = T, x_lab_rotate=T, scale=T, dot.scale=10)
+wat_dotplot_data <- dotplot_obj$data
+write.csv(dotplot_data, "wat_dotplot_data.csv")
+

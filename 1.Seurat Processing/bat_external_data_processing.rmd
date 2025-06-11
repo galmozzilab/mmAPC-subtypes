@@ -1,0 +1,655 @@
+# BAT Reference mapping for external datasets
+
+This script will generate the following figures:
+Fig. 5C - Reference mapping of 2 datasets (karlina, burl)
+Fig. 5D - quantification of labeled cells from mapping
+
+
+## Data downloaded links:
+Karlina - https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE161447
+Burl - https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE207707
+https://github.com/RBBurl1227/eLife-2022-ColdInducedBrownAdipocyteNeogenesis
+
+
+# Part A- process external data
+
+### libraries
+```{r}
+library(Seurat)
+library(SeuratData)
+library(glmGampoi)
+library(Seurat.utils)
+library(scDblFinder)
+library(dittoSeq)
+library(pheatmap)
+library(gprofiler2)
+
+library(tximport)
+library(AnnotationHub)
+library(edgeR)
+library(AnnotationDbi)
+
+library(RColorBrewer)
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+```
+
+### karlina dataset
+```{r}
+#read in data
+karlina.data = Read10X(data.dir = "F:/new_analysis/integrated_analysis/bat/Karlina2021")
+
+#convert into seurat object
+karlina = CreateSeuratObject(counts = karlina.data, project = "karlina", min.cells = 3, min.features = 200)
+karlina = CreateSeuratObject(counts = karlina.data, project = "karlina", min.cells = 3, min.features = 200)
+karlina$data.set = rep("karlina", length(karlina$orig.ident))
+
+#calculate percent mitochondrial RNA for karlinapreads
+karlina[["percent.mt"]] = PercentageFeatureSet(karlina, pattern = "^mt-")
+karlina[["percent.mt"]] = PercentageFeatureSet(karlina, pattern = "^MT-")
+
+karlina[["percent.ribo"]] <- PercentageFeatureSet(karlina, pattern="^rps")
+
+
+karlina[["percent.ribo"]] <- PercentageFeatureSet(karlina, features = ribo.genes)
+####################end##########
+#generate violin plot #genes/cell, mtRNA/cell, reads/cell
+VlnPlot(karlina, features= c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"), pt.size=0.5, ncol = 3)
+#rerun without the dots
+VlnPlot(karlina, features= c("nFeature_RNA", "nCount_RNA", "percent.mt"), pt.size=0, ncol = 3)
+
+#Feature Scatter visualize feature-feature relationships, but can be used
+# for anything calculated by the object, i.e. columns in object metadata, PC scores etc.
+plot1 <- FeatureScatter(karlina, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(karlina, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot1 + plot2
+
+
+
+#apply filter-- UMI 6000-60000, features 3900-7700, mito umi 1.7-5
+karlina <- subset(karlina, subset = nCount_RNA<15000 & percent.mt < 20)
+karlina<- UpdateSeuratObject(karlina)
+
+#normalizing the data -normalizes the feature expression measurements for each cell by the total expression, multiplies this by a scale factor (10,000 by default), and log-transforms the result
+karlina <- NormalizeData(karlina, normalization.method = "LogNormalize", scale.factor = 10000)
+
+#identification of highly variable features
+karlina <- FindVariableFeatures(karlina, selection.method = "vst", nfeatures = 4000)
+
+#Identify the 10 most highly variable genes
+top10 <- head(VariableFeatures(karlina), 10)
+top10
+# plot variable features with and without labels
+plot1 <- VariableFeaturePlot(wat)
+plot2 <- LabelPoints(plot = plot1, points = top10, repel = TRUE)
+plot1 + plot2
+
+#scaling the data -pre-processing step prior to dimensional reduction techniques like PCA. The ScaleData() function:
+#Shifts the expression of each gene, so that the mean expression across cells is 0
+#Scales the expression of each gene, so that the variance across cells is 1
+#This step gives equal weight in downstream analyses, so that highly-expressed genes do not dominate
+#The results of this are stored in pbmc[["RNA"]]@scale.data 
+all.genes <- rownames(karlina)
+karlina <- ScaleData(karlina, features = all.genes)
+
+karlina <-SCTransform(karlina)
+
+
+
+#PCA
+karlina <- RunPCA(karlina, features = VariableFeatures(object = karlina))
+
+#determine dimensionality
+ElbowPlot(karlina, ndims = 50, reduction = "pca")
+karlina <- JackStraw(karlina, num.replicate=100)
+karlina <- ScoreJackStraw(karlina, dims = 1:20)
+JackStrawPlot(karlina, dims = 1:15)
+
+#clustering
+karlina <- FindNeighbors(karlina, dims = 1:50)
+karlina <- FindClusters(karlina, resolution = 0.5)
+karlina <- FindClusters(karlina, resolution = 0.25)
+
+#umap
+karlina <- RunUMAP(karlina, dims = 1:50)
+DimPlot(karlina)
+
+#renaming clusters
+new_cluster_names <- c("0" = "APC1",
+                       "3" = "APC2",
+                       "5" = "Mature BAT")
+# Rename clusters in the metadata
+karlina <- RenameIdents(karlina, new_cluster_names)
+Idents(karlina.preads) <- seurat_object$new_metadata_column
+
+#########################################################
+###############SUBSETTING ONLY ADIPOCELLS################
+#########################################################
+
+
+karlina.preads <-subset(karlina, idents=c("APC1", "APC2"), invert=FALSE)
+karlina.preads <-subset(karlina, idents=c(0,8), invert=FALSE)
+karlina.preads <- SCTransform(karlina.preads)
+
+
+karlina.preads <- NormalizeData(karlina.preads, normalization.method = "LogNormalize", scale.factor = 10000)
+#identification of highly variable features
+karlina.preads <- FindVariableFeatures(karlina.preads, selection.method = "vst", nfeatures = 4000)  
+all.genes <- rownames(karlina.preads)
+karlina.preads <- ScaleData(karlina.preads, features = all.genes)
+
+  
+  
+#change names of clusters to "B"+number
+karlina.preads@meta.data$karlina_clusters <- as.factor(karlina.preads@active.ident)
+
+#PCA
+karlina.preads <- RunPCA(karlina.preads, features = VariableFeatures(object = karlina.preads))
+
+#determine dimensionality
+ElbowPlot(karlina.preads, ndims = 50, reduction = "pca")
+karlina.preads <- JackStraw(karlina.preads, num.replicate=100)
+karlina.preads <- ScoreJackStraw(karlina.preads, dims = 1:20)
+JackStrawPlot(karlina.preads, dims = 1:15)
+
+#clustering
+karlina.preads <- FindNeighbors(karlina.preads, dims = 1:50)
+karlina.preads <- FindClusters(karlina.preads, resolution = 0.7)
+
+#umap
+karlina.preads <- RunUMAP(karlina.preads, dims = 1:50)
+DimPlot(karlina.preads, pt.size=2)
+```
+
+### Burl dataset
+```{r}
+#according to how they constructed their data, they first merged the RT and COLD in each condition using merge() for each rep
+#then they used FindIntegrationAnchors and IntegrateData on 2 replicates
+#So, my plan is to replicate their same processing, label them as is, then subset the treatment="RT"
+############Seurat processing
+############
+#O_RT.data <- Read10X(data.dir = "~/SoupX/PATH/C57_RT_Rep1_LN_SoupX F:/new_analysis/integrated_analysis/bat/Burl2022/rep1/RT")
+O_RT.data <- Read10X(data.dir = "F:/new_analysis/integrated_analysis/bat/Burl2022/linneg/rep1/RT")
+O_RT <- CreateSeuratObject(counts = O_RT.data, min.cells=3, project = "C57_RT_Rep1_LN_SoupX")
+O_RT$Replicate <- "Rep1"
+O_RT$Treatment <- "CONTROL"
+str(O_RT) #5886
+############################################################################
+#O_6C.data <- Read10X(data.dir = "~/SoupX/PATH/C57_COLD_Rep1_LN_SoupX F:/new_analysis/integrated_analysis/bat/Burl2022/rep1/COLD")
+O_6C.data <- Read10X(data.dir = "F:/new_analysis/integrated_analysis/bat/Burl2022/linneg/rep1/COLD")
+O_6C <- CreateSeuratObject(counts = O_6C.data, min.cells=3, project = "C57_COLD_Rep1_LN_SoupX")
+O_6C$Replicate <- "Rep1"
+O_6C$Treatment <- "COLD"
+str(O_6C) #10242
+############################################################################
+#R_RT.data <- Read10X(data.dir = "~/SoupX/PATH/C57_RT_Rep2_LN_SoupX F:/new_analysis/integrated_analysis/bat/Burl2022/rep2/RT")
+R_RT.data <- Read10X(data.dir = "F:/new_analysis/integrated_analysis/bat/Burl2022/linneg/rep2/RT")
+R_RT <- CreateSeuratObject(counts = R_RT.data, min.cells=3, project = "C57_RT_Rep2_LN_SoupX")
+R_RT$Replicate <- "Rep2"
+R_RT$Treatment <- "CONTROL"
+str(R_RT) #22072
+############################################################################
+#R_6C.data <- Read10X(data.dir = "~/SoupX/PATH/C57_COLD_Rep2_LN_SoupX F:/new_analysis/integrated_analysis/bat/Burl2022/rep2/COLD")
+R_6C.data <- Read10X(data.dir = "F:/new_analysis/integrated_analysis/bat/Burl2022/linneg/rep2/COLD")
+R_6C <- CreateSeuratObject(counts = R_6C.data, min.cells=3, project = "C57_COLD_Rep2_LN_SoupX")
+R_6C$Replicate <- "Rep2"
+R_6C$Treatment <- "COLD"
+str(R_6C) #7414
+
+
+###################
+#Subset
+###################
+O_RT[["percent.mt"]] <- PercentageFeatureSet(O_RT, pattern = "^mt-")
+O_6C[["percent.mt"]] <- PercentageFeatureSet(O_6C, pattern = "^mt-")
+R_RT[["percent.mt"]] <- PercentageFeatureSet(R_RT, pattern = "^mt-")
+R_6C[["percent.mt"]] <- PercentageFeatureSet(R_6C, pattern = "^mt-")
+O_RT <- subset(O_RT, subset = percent.mt < 10 & nCount_RNA < 15000 & nFeature_RNA > 100)
+O_6C <- subset(O_6C, subset = percent.mt < 10 & nCount_RNA < 15000 & nFeature_RNA > 100)
+R_RT <- subset(R_RT, subset = percent.mt < 10 & nCount_RNA < 15000 & nFeature_RNA > 100)
+R_6C <- subset(R_6C, subset = percent.mt < 10 & nCount_RNA < 15000 & nFeature_RNA > 100)
+str(O_RT) #5603
+str(O_6C) #9855
+str(R_RT) #6171
+str(R_6C) #7062
+
+
+O_RT <- NormalizeData(O_RT)
+O_6C <- NormalizeData(O_6C)
+R_RT <- NormalizeData(R_RT)
+R_6C <- NormalizeData(R_6C)
+
+
+###################
+#Merge
+###################
+#https://satijalab.org/seurat/v3.1/merge_vignette.html
+OGnorm <- merge(O_RT, y = O_6C, project = "OG_Linneg", merge.data = TRUE)
+RTnorm <- merge(R_RT, y = R_6C, project = "RT_Linneg", merge.data = TRUE)
+
+
+###################
+#Find Variable Features
+###################
+OGnorm <- FindVariableFeatures(OGnorm, selection.method = "vst", nfeatures = 2000)
+RTnorm <- FindVariableFeatures(RTnorm, selection.method = "vst", nfeatures = 2000)
+
+OGnorm <-SCTransform(OGnorm)
+###################
+###################
+#Integrate
+#######################dim = 12, res 0.1
+LNanchors12 <- FindIntegrationAnchors(object.list = list(OGnorm, RTnorm), dims = 1:12) 
+Linneg_mi_d12 <- IntegrateData(anchorset = LNanchors12, dims = 1:12) #this is not working with seurat V5. 
+
+#need to use new layer function instead (https://github.com/satijalab/seurat/issues/8304) and
+#https://github.com/satijalab/seurat/issues/7985#issuecomment-1806483174
+OGnorm = JoinLayers(OGnorm)
+LayerData(OGnorm, assay = "RNA", layer = "counts")
+
+RTnorm= JoinLayers(RTnorm)
+LayerData(RTnorm, assay = "RNA", layer = "counts")
+
+#now do IntegrateData
+LNanchors12 <- FindIntegrationAnchors(object.list = list(OGnorm, RTnorm), dims = 1:12) 
+Linneg_mi_d12 <- IntegrateData(anchorset = LNanchors12, dims = 1:12) #this only integrate 2000 genes.
+
+#I'll need to edit to integrate all genes instead
+#3 options:
+#1 adjust arg features.to.integrate= all genes in IntegrateData
+#2 set VariableFeatures in FindIntegrationAnchors to be more than 2000
+#3 merge control samples from very beginning, join layers, scale data
+
+
+###################
+#Scale
+###################
+allgenesmi12 <- rownames(Linneg_mi_d12)
+Linneg_mi_d12 <- ScaleData(Linneg_mi_d12, features = allgenesmi12)
+###################
+#PCs
+###################
+Linneg_mi_d12 <- RunPCA(Linneg_mi_d12, features = VariableFeatures(object = Linneg_mi_d12))
+Linneg_mi_d12 <- FindNeighbors(Linneg_mi_d12, dims = 1:12)
+###################
+#Visualize Data
+###################
+Linneg_mi_d12_r1 <- FindClusters(Linneg_mi_d12, resolution = 0.1)
+#TSNE
+Linneg_mi_d12_r1_t <- RunTSNE(Linneg_mi_d12_r1, dims = 1:12)
+png("Linneg_mi_d12_r1_tsne_1.png")
+DimPlot(Linneg_mi_d12_r1_t, reduction = "tsne")
+dev.off()
+png("Linneg_mi_d12_r1_tsne_2.png")
+DimPlot(Linneg_mi_d12_r1_t, reduction = "tsne", split.by = "Treatment")
+dev.off()
+
+
+#change order of treatment for split.by
+Linneg_mi_d12_r1_t$Treatment <- factor(Linneg_mi_d12_r1_t$Treatment, levels = c('CONTROL', 'COLD'))
+
+
+#Set new cluster ids
+#here I edit because the yellow ASC and red ASC are represented as 1 cluster in my processing.
+
+new.cluster.ids <- c("ASC", "ASC", "VEC", "Prolif/Diff", "VSMC", "Immune", "Schwann")
+names(new.cluster.ids) <- levels(Linneg_mi_d12_r1_t)
+Linneg_mi_d12_r1_t <- RenameIdents(Linneg_mi_d12_r1_t, new.cluster.ids)
+levels(Linneg_mi_d12_r1_t)
+#[1] "ASC"         "VEC"         "Prolif/Diff" "VSMC"        "Immune"      "Schwann"    
+Linneg_mi_d12_r1_t[["seurat_cident"]] <- Idents(object = Linneg_mi_d12_r1_t)
+
+
+
+#create metadata file to subset to just ASCs
+#I also edit here to fit my list to just get ASC and prolif/diff
+Linneg_mi_d12_r1_t_ASCs <- subset(Linneg_mi_d12_r1_t, idents = c("ASC", "Prolif/Diff")) 
+Linneg_mi_d12_r1_t@meta.data$seurat_cident %>% table()
+#####paper ident
+#ASC               1 ASC               2              ASC1-3                 VEC 
+#               6665                5313                4801                4488 
+#        Prolif/Diff                VSMC              Immune             Schwann 
+#               2880                2561                1504                 479
+####My ident
+#ASC         VEC Prolif/Diff        VSMC      Immune     Schwann 
+#16737        4404        2981        2563        1475         531 
+
+Linneg_mi_d12_r1_t_ASCs@meta.data$seurat_cident %>% table()
+#ASC               1 ASC               2              ASC1-3                 VEC 
+#               6665                5313                4801                   0 
+#        Prolif/Diff                VSMC              Immune             Schwann 
+#               2880                   0                   0                   0
+
+###My ident:
+#ASC         VEC Prolif/Diff        VSMC      Immune     Schwann 
+#16737           0        2981           0           0           0 
+write.csv(Linneg_mi_d12_r1_t_ASCs@meta.data, "F:/new_analysis/integrated_analysis/bat/Burl2022/linneg/Linneg_mi_d12_r1_t_ASCs_md.csv")
+
+##################################
+##################################
+##################################subset raw data to just ASCs; reanalyze
+##################################
+##################################
+ad12 <- read.csv("F:/new_analysis/integrated_analysis/bat/Burl2022/linneg/Linneg_mi_d12_r1_t_ASCs_md.csv", header = TRUE)
+str(ad12) #19659
+          #ours is 19718
+ad12_Rep1 <- ad12[ad12$Replicate == 'Rep1',]
+ad12_Rep2 <- ad12[ad12$Replicate == 'Rep2',]
+str(ad12_Rep1) #10766
+              #ours is 10818
+
+str(ad12_Rep2) #8893
+              #ours is 8900
+
+ad12_Rep1CON <- ad12_Rep1[ad12_Rep1$Treatment == 'CONTROL',]
+str(ad12_Rep1CON) #3586
+              #ours is 3596
+head(ad12_Rep1CON) #_1_1
+ad12_Rep1COLD <- ad12_Rep1[ad12_Rep1$Treatment == 'COLD',]
+str(ad12_Rep1COLD) #7180
+head(ad12_Rep1COLD) #_2_1
+
+ad12_Rep2CON <- ad12_Rep2[ad12_Rep2$Treatment == 'CONTROL',]
+str(ad12_Rep2CON) #3736
+head(ad12_Rep2CON) #_1_2
+ad12_Rep2COLD <- ad12_Rep2[ad12_Rep2$Treatment == 'COLD',]
+str(ad12_Rep2COLD) #5157
+head(ad12_Rep2COLD) #_2_2
+
+ad12_Rep1CON$X <- gsub('_1_1', '', ad12_Rep1CON$X)
+ad12_Rep1COLD$X <- gsub('_2_1', '', ad12_Rep1COLD$X)
+ad12_Rep2CON$X <- gsub('_1_2', '', ad12_Rep2CON$X)
+ad12_Rep2COLD$X <- gsub('_2_2', '', ad12_Rep2COLD$X)
+head(ad12_Rep1CON)
+head(ad12_Rep1COLD)
+head(ad12_Rep2CON)
+head(ad12_Rep2COLD)
+
+######################
+#subset to just ASCs
+######################
+
+O_RT_ad12_ASC <- subset(O_RT, cells = ad12_Rep1CON$X)
+O_6C_ad12_ASC <- subset(O_6C, cells = ad12_Rep1COLD$X)
+R_RT_ad12_ASC <- subset(R_RT, cells = ad12_Rep2CON$X)
+R_6C_ad12_ASC <- subset(R_6C, cells = ad12_Rep2COLD$X)
+
+str(O_RT_ad12_ASC) #3586
+str(O_6C_ad12_ASC) #7180
+str(R_RT_ad12_ASC) #3736
+str(R_6C_ad12_ASC) #5157
+
+
+###################
+#Normalize
+###################
+O_RT_ad12_ASC <- NormalizeData(O_RT_ad12_ASC)
+O_6C_ad12_ASC <- NormalizeData(O_6C_ad12_ASC)
+R_RT_ad12_ASC <- NormalizeData(R_RT_ad12_ASC)
+R_6C_ad12_ASC <- NormalizeData(R_6C_ad12_ASC)
+
+
+###################
+#Merge
+###################
+#https://satijalab.org/seurat/v3.1/merge_vignette.html
+OGnorm_ad12_ASC <- merge(O_RT_ad12_ASC, y = O_6C_ad12_ASC, project = "OG_Linneg", merge.data = TRUE)
+RTnorm_ad12_ASC <- merge(R_RT_ad12_ASC, y = R_6C_ad12_ASC, project = "RT_Linneg", merge.data = TRUE)
+
+
+#join layers
+#need to use new layer function instead (https://github.com/satijalab/seurat/issues/8304) and
+#https://github.com/satijalab/seurat/issues/7985#issuecomment-1806483174
+OGnorm_ad12_ASC = JoinLayers(OGnorm_ad12_ASC)
+LayerData(OGnorm_ad12_ASC, assay = "RNA", layer = "counts")
+
+RTnorm_ad12_ASC= JoinLayers(RTnorm_ad12_ASC)
+LayerData(RTnorm_ad12_ASC, assay = "RNA", layer = "counts")
+
+###################
+#Find Variable Features
+###################
+OGnorm_ad12_ASC <- FindVariableFeatures(OGnorm_ad12_ASC, selection.method = "vst", nfeatures = 2000)
+###
+RTnorm_ad12_ASC <- FindVariableFeatures(RTnorm_ad12_ASC, selection.method = "vst", nfeatures = 2000)
+
+#Integrate
+###################
+anchors8 <- FindIntegrationAnchors(object.list = list(OGnorm_ad12_ASC, RTnorm_ad12_ASC), dims = 1:8) 
+ad12_d8 <- IntegrateData(anchorset = anchors8, dims = 1:8)
+###################
+#Scale
+###################
+ad12_genes8 <- rownames(ad12_d8)
+ad12_d8 <- ScaleData(ad12_d8, features = ad12_genes8)
+###################
+#PCs
+###################
+ad12_d8 <- RunPCA(ad12_d8, features = VariableFeatures(object = ad12_d8))
+ad12_d8 <- FindNeighbors(ad12_d8, dims = 1:8)
+###################
+#Visualize Data
+###################
+ad12_d8_r2 <- FindClusters(ad12_d8, resolution = 0.2)
+#TSNE
+ad12_d8_r2_t <- RunTSNE(ad12_d8_r2, dims = 1:8)
+png("ad12_d8_r2_tsne_1.png")
+DimPlot(ad12_d8_r2_t, reduction = "tsne")
+dev.off()
+DimPlot(ad12_d8_r2_t, split.by='Treatment', group.by="Replicate")
+
+###################
+#Set new cluster ids
+###################
+new.cluster.ids <- c("ASC1_cold-activated", "ASC2", "ASC1_quiescent", "ASC3", "Prolif/Diff",  "Prolif/Non-diff")
+names(new.cluster.ids) <- levels(ad12_d8_r2_t)
+ad12_d8_r2_t <- RenameIdents(ad12_d8_r2_t, new.cluster.ids)
+levels(ad12_d8_r2_t)
+#[1] "ASC1_cold-activated" "ASC2"                "ASC1_quiescent"     
+#[4] "Prolif/Diff"         "ASC3"                "Prolif/Non-diff"
+levels(x = ad12_d8_r2_t) <- c("ASC1_quiescent", "ASC1_cold-activated", "ASC2", "ASC3", "Prolif/Non-diff", "Prolif/Diff")
+levels(ad12_d8_r2_t)
+
+ad12_d8_r2_t@meta.data$burl_clusters <- as.factor(ad12_d8_r2_t@active.ident)
+saveRDS(ad12_d8_r2_t, file="F:/new_analysis/integrated_analysis/bat/Burl2022/linneg/ASC_labeled.rds")
+
+```
+
+
+
+
+# Part B. Perform reference mapping
+
+###################
+#Reference mapping#
+###################
+## Load in BAT
+```{r}
+bat_cc <- readRDS('PATH/TO/bat_cc.rds') #this paper's bat_cc object
+#if object already loaded, just change their name
+bat<- bat_cc
+```
+
+## renames objects from above
+```{r}
+bat <- bat_cc
+karlina <- karlina.preads
+burl <- ad12_d8_r2_t
+```
+
+## Figure 5A BAT reference mapping, along with their counts for Fig. 5D
+
+### Reference mapping for sarvari dataset
+```{r}
+bat_cc <- RunUMAP(bat_cc, dims=1:10, return.model = TRUE) #have to return the model to 
+bat=bat_cc
+
+DefaultAssay(bat) <- 'RNA'
+
+
+burl_anchors <- FindTransferAnchors(
+  reference = bat,
+  query = burl,
+  normalization.method = "LogNormalize",
+  reference.reduction = "pca",
+  dims = 1:50
+) #1199 anchors
+
+bat_ref <- MapQuery(
+  anchorset = burl_anchors,
+  query = burl,
+  reference = bat,
+  refdata = list(
+    bat_bclusters= 'bat_named_bclusters'
+  ),
+  reference.reduction = "pca", 
+  reduction.model = "umap"
+)
+
+DimPlot(bat_ref, reduction='ref.umap', group.by= 'predicted.bat_bclusters')
+
+
+
+
+#counting
+results <- data.frame()  # Initialize an empty data frame to store results
+
+for (cluster in unique(bat_ref$predicted.bat_bclusters)) {
+  # Get counts for each category within the current cluster
+  cellcounts <- table(bat_ref$burl_clusters[bat_ref$predicted.bat_bclusters == cluster])
+  
+  # Combine the counts into a temporary data frame
+  temp_df <- data.frame(
+    predicted_cell_type = cluster,
+    query_cells = names(cellcounts),
+    count = as.integer(cellcounts)
+  )
+  
+  # Append to the results data frame
+  results <- rbind(results, temp_df)
+}
+
+#Fig. 5D Burl predicted labels counting
+cell_counts <- table(bat_ref$burl_clusters, bat_ref$predicted.bat_bclusters)
+
+write.csv(results, "R:/Galmozzi lab/Hoang/Projects/Adipocyte Subtypes/integrated_analysis/Reference_mapping/sarvari_ref_counts.csv")
+write.csv(results, "F:/new_analysis/labeled_analysis/reference_mapping_rds/burl_ref_counts.csv") #counts
+write.csv(cell_counts, "F:/new_analysis/labeled_analysis/reference_mapping_rds/burl_ref_counts2.csv")
+
+write.csv(results, "R:/Galmozzi lab/Hoang/Projects/Adipocyte Subtypes/integrated_analysis/Reference_mapping/burl_ref_counts.csv")
+
+#merge reference and query
+reference=bat
+query=bat_ref
+reference$id <- 'reference'
+query$id <- 'query'
+refquery <- merge(reference, query)
+refquery[["umap"]] <- merge(reference[["umap"]], query[["ref.umap"]])
+
+DimPlot(refquery, group.by = 'id', shuffle = TRUE)
+
+burl_colors= c("red","darkgoldenrod4","brown","violet","blue","springgreen4")
+
+DimPlot(refquery, group.by='burl_clusters', pt.size = 3, cols=burl_colors, na.value='lightgrey')
+
+DimPlot(refquery, group.by='predicted.bat_bclusters')
+
+
+
+#setting the right order
+refquery <-SetIdent(refquery, value='predicted.bat_bclusters')
+my_levels<- c('Early Preads B1', "Early Preads B2", "Early Preads B3","Early Preads B5", "bCAPs",'bFAPLs')
+Idents(refquery) <- factor(Idents(refquery), levels=my_levels)
+
+# Fig. 5C Burl reference mapping
+
+DimPlot(refquery, pt.size=3, cols = c("#00868b", "#cd5b45", "#FFE300", "#00FFFF", "#0000FF", "#FF0000")) #with ordering
+DimPlot(refquery, pt.size=3, cols = c( "#0000FF", "#FF0000", "#00868b", "#cd5b45", "#FFE300", "#00FFFF"), group.by="predicted.bat_bclusters", na.value='lightgrey')
+
+
+saveRDS(bat_ref, file= 'F:/new_analysis/labeled_analysis/reference_mapping_rds/mapped_burl.rds')
+saveRDS(refquery, file= 'F:/new_analysis/labeled_analysis/reference_mapping_rds/mapped_burl_merged_umap.rds')
+
+```
+
+
+### Reference mapping for Karlina dataset
+```{r}
+levels(karlina)
+new_cluster_ids <- c('0(Karlina 0)', '1(Karlina 3)', "2(Karlina 2)", '3(Karlina 1)')
+
+names(new_cluster_ids) <- levels(karlina)
+karlina <- RenameIdents(karlina, new_cluster_ids)
+karlina@meta.data$karlina_reconstructed_clusters <- as.factor(karlina@active.ident)
+
+DefaultAssay(bat) <- "SCT"
+
+karlina_anchors <- FindTransferAnchors(
+  reference = bat,
+  query = karlina,
+  normalization.method = "LogNormalize",
+  reference.reduction = "pca",
+  dims = 1:50
+) #265 anchors
+
+bat_ref <- MapQuery(
+  anchorset = karlina_anchors,
+  query = karlina,
+  reference = bat,
+  refdata = list(
+    bat_bclusters= 'bat_named_bclusters'
+  ),
+  reference.reduction = "pca", 
+  reduction.model = "umap"
+)
+
+DimPlot(bat_ref, reduction='ref.umap', group.by= 'predicted.bat_bclusters')
+
+#plotting on the reference UMAP
+reference= bat
+reference <- DietSeurat(reference, counts = FALSE, dimreducs = c("umap"))
+
+query <- DietSeurat(bat_ref, counts = FALSE, dimreducs = c("ref.umap"))
+
+results <- data.frame()  # Initialize an empty data frame to store results
+
+for (cluster in unique(bat_ref$predicted.bat_bclusters)) {
+  # Get counts for each category within the current cluster
+  cellcounts <- table(bat_ref$karlina_reconstructed_clusters[bat_ref$predicted.bat_bclusters == cluster])
+  
+  # Combine the counts into a temporary data frame
+  temp_df <- data.frame(
+    predicted_cell_type = cluster,
+    query_cells = names(cellcounts),
+    count = as.integer(cellcounts)
+  )
+  
+  # Append to the results data frame
+  results <- rbind(results, temp_df)
+}
+
+#Fig. 5D Karlina
+cell_counts <- table(bat_ref$karlina_reconstructed_clusters, bat_ref$predicted.bat_bclusters)
+write.csv(results, "R:/Galmozzi lab/Hoang/Projects/Adipocyte Subtypes/integrated_analysis/Reference_mapping/karlina_ref_counts.csv")
+
+write.csv(results, "F:/new_analysis/labeled_analysis/reference_mapping_rds/karlina_ref_counts.csv") #counts
+write.csv(cell_counts, "F:/new_analysis/labeled_analysis/reference_mapping_rds/karlina_ref_counts2.csv")
+
+#merge reference and query
+reference$id <- 'reference'
+query$id <- 'query'
+refquery <- merge(reference, query)
+refquery[["umap"]] <- merge(reference[["umap"]], query[["ref.umap"]])
+#refquery <- RunUMAP(refquery, reduction = 'pca', dims = 1:50)
+
+
+#Fig. 5C Karlina
+DimPlot(refquery, group.by = 'id', shuffle = TRUE)
+karlina_colors= c('aquamarine4','plum4','navy','violetred')
+DimPlot(refquery, group.by='karlina_reconstructed_clusters', pt.size = 3, cols=karlina_colors, na.value='lightgrey')
+
+DimPlot(refquery, group.by='predicted.bat_bclusters', pt.size=3, cols = c('#FF0000','#cd5b45'), na.value = 'lightgrey')
+
+saveRDS(refquery, file= 'F:/new_analysis/labeled_analysis/reference_mapping_rds/mapped_karlina_merged_umap.rds')
+saveRDS(bat_ref, file= 'F:/new_analysis/labeled_analysis/reference_mapping_rds/mapped_karlina.rds')
