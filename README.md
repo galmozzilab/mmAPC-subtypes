@@ -3,11 +3,6 @@
 ## Overview
 This repository contains code and data for analyzing WAT and BAT adipocyte precursor cells. The scripts in this repository are designed to clean data, perform statistical analysis, and generate  figures.
 
-## Project Structure
-* `data/`: Contains raw and processed data files.
-* `scripts/`: Python/R scripts for data processing, analysis, and figure generation.
-* `figures/`: Directory where generated figures are saved.
-* `README.md`: This document.
 
 ## Script to Figure Mapping
 
