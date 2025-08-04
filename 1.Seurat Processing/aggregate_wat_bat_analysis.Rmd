@@ -234,6 +234,65 @@ common_fapls= intersect(rownames(bfapls_markers.up), rownames(wfapls_markers.up)
 #list B: bcaps or bfapls up markers (p_val_adj<0.05)
 #the output will show genes that are shared and unique
 
+#################################
+wat <- SCTransform(wat_cc)
+DefaultAssay(wat_cc)
+wcaps_markers= FindMarkers(wat_cc,'wCAPs') %>% filter(p_val_adj<0.05)
+wfapls_markers= FindMarkers(wat_cc, 'wFAPLs') %>% filter(p_val_adj<0.05)
+
+DefaultAssay(bat_cc)
+Idents(bat_cc) <- 'bat_named_bclusters'
+bcaps_markers= FindMarkers(bat,'bCAPs')%>% filter(p_val_adj<0.05) #for BAT
+bfapls_markers= FindMarkers(bat, 'bFAPLs')%>% filter(p_val_adj<0.05)
+
+#for the unfiltered pct.1 venn diagram
+
+sc_wfapls <- wfapls_markers %>% filter(p_val_adj<0.05, avg_log2FC>0) %>% rownames()
+sc_bfapls <- bfapls_markers %>% filter(p_val_adj<0.05, avg_log2FC>0) %>% rownames()
+venn.plot <- venn.diagram(
+  x = list(Sc_wFAPLs = sc_wfapls, Sc_bFAPLs = sc_bfapls),
+  filename = NULL,
+  fill = c("khaki", "royalblue"), alpha = 0.5
+)
+grid::grid.draw(venn.plot)
+
+
+
+sc_wcaps <- wcaps_markers %>% filter(p_val_adj<0.05, avg_log2FC>0) %>% rownames()
+sc_bcaps <- bcaps_markers %>% filter(p_val_adj<0.05, avg_log2FC>0) %>% rownames()
+venn.plot <- venn.diagram(
+  x = list(Sc_wCAPs = sc_wcaps, Sc_bCAPs = sc_bcaps),
+  filename = NULL,
+  fill = c("khaki", "royalblue"), alpha = 0.5
+)
+grid::grid.draw(venn.plot)
+
+
+#get list of unique and overlap unfiltered pct
+shared_sc_fapl_markers <- intersect(sc_wfapls, sc_bfapls)
+unique_sc_wfapls <- setdiff(sc_wfapls, sc_bfapls)
+unique_sc_bfapls <- setdiff(sc_bfapls, sc_wfapls)
+
+shared_sc_caps_markers <- intersect(sc_wcaps, sc_bcaps)
+unique_sc_wcaps <- setdiff(sc_wcaps, sc_bcaps)
+unique_sc_bcaps <- setdiff(sc_bcaps, sc_wcaps)
+
+#filter for .75 pct genes
+sc_wcaps_0.75 <- wcaps_markers %>% filter(p_val_adj<0.05, avg_log2FC>0, pct.1>0.75) %>% rownames()
+sc_bcaps_0.75 <- bcaps_markers %>% filter(p_val_adj<0.05, avg_log2FC>0, pct.1>0.75) %>% rownames()
+
+sc_wfapls_0.75 <- wfapls_markers %>% filter(p_val_adj<0.05, avg_log2FC>0, pct.1>0.75) %>% rownames()
+sc_bfapls_0.75 <- bfapls_markers %>% filter(p_val_adj<0.05, avg_log2FC>0, pct.1>0.75) %>% rownames()
+
+#get list of unique and overlap filtered pct.1>0.75
+shared_0.75_sc_fapl_markers <- intersect(sc_wfapls, sc_bfapls)
+unique_0.75_sc_wfapls <- setdiff(sc_wfapls, sc_bfapls)
+unique_sc_0.75_bfapls <- setdiff(sc_bfapls, sc_wfapls)
+
+shared_0.75_sc_caps_markers <- intersect(sc_wcaps_0.75, sc_bcaps_0.75)
+unique_0.75_sc_wcaps <- setdiff(sc_wcaps_0.75, sc_bcaps_0.75)
+unique_0.75_sc_bcaps <- setdiff(sc_bcaps_0.75, sc_wcaps_0.75)
+
 
 ```
 

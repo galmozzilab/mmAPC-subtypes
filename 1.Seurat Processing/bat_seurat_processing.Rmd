@@ -1,10 +1,9 @@
 # bat PROCESSING
 This script will generate the following figures:
-Fig. EV2A- bat UMAP without non-adipocells, grouped by original clusterings
-Fig. EV2B- bat UMAP without non-adipocells before CC regression, grouped by CC Phase
-Fig. EV2C- bat cell cycle distribution pre-regression
-Fig. EV2D - bat UMAP without non-adipocells after CC regression, grouped by CC Phase
-Fig. EV2E - bat cell cycle distribution post-regression
+Fig. EV1F- bat UMAP without non-adipocells, grouped by original clusterings
+Fig. EV1G- bat UMAP without non-adipocells before CC regression, grouped by CC Phase
+Fig. EV1H- bat cell cycle distribution pre-regression
+Fig. EV1J - bat cell cycle distribution post-regression
 Fig. EV2B - markers of top 10% wAPC heatmap
 Fig. 1C Pre-exclusion UMAP of bat
 Fig. 1E Plot violin plots of adipocells and non-adipocell markers 
@@ -391,12 +390,12 @@ bat_colors= c("#00868b", "#cd5b45", "#FFE300","#00BFFF","#00FFFF","#0000FF", "#F
 DoHeatmap(bat_cc_diet, significant_markers_bat, group.colors= bat_colors)+ scale_fill_gradientn(colors = rev(RColorBrewer::brewer.pal(5, "RdBu")))
 ```
 
-Fig. 1B Pre-exclusion UMAP of bat
+Fig. 1C Pre-exclusion UMAP of bat
 ```{r}
 DimPlot(bat_unexcluded, cols = bat_raw_colors, pt.size=2, group.by="bat_unexcluded_clusters")
 ```
 
-Fig. 1D Plot violin plots of adipocells and non-adipocell markers 
+Fig. 1E Plot violin plots of adipocells and non-adipocell markers 
 ```{r}
 #plot the violins for markers of non-adipocells
 Stacked_VlnPlot(bat_unexcluded, colors_use = bat_raw_colors, features= c("Myod1","Plp1",'Ptprc','Fabp4','Pparg','Dlk1','Pdgfra','Pdgfrb'), x_lab_rotate=45)
@@ -404,13 +403,13 @@ Stacked_VlnPlot(bat_unexcluded, colors_use = bat_raw_colors, features= c("Myod1"
 ```
 
 
-Fig. 1F - Final UMAP of bat clusters after non-adipocell exclusion and CC regression 
+Fig. 1G - Final UMAP of bat clusters after non-adipocell exclusion and CC regression 
 ```{r}
 bat_colors= c("#00868b", "#cd5b45", "#FFE300","#00BFFF","#00FFFF","#0000FF", "#FF0000") 
 DimPlot(bat_cc, cols= bat_colors, pt.size=2)
 ```
 
-Fig. 1H - Stacked violin plots of prominent markers
+Fig. 1I - Stacked violin plots of prominent markers
 ```{r}
 Stacked_VlnPlot(bat_cc, features=c("Pdgfra", "Pdgfrb", "Dlk1", "Pparg", "Fabp4", 'Sema3a','Nav3','Lrrc15','Cdca3','Kif20a','Creb5','Ptprz1','Igf1','Hp','Mecom','Serpinb1a','Cryab'), colors_use=bat_colors, x_lab_rotate = 45)
 
@@ -462,8 +461,8 @@ write.csv(bfapls_markers, "bfapls_markers.csv")
 
 Table EV4 - DEGs between bCAPs vs bFAPLs
 ```{r}
-wcaps_wfapls_degs <- FindMarkers(bat_cc, ident.1='wCAPs', ident.2 = 'wFAPLs')
-write.csv(wcaps_wfapls_degs, file ="DEGs_wCAPs_vs_wFAPLs.csv")
+bcaps_bfapls_degs <- FindMarkers(bat_cc, ident.1='wbAPs', ident.2 = 'bFAPLs')
+write.csv(wcaps_wfapls_degs, file ="DEGs_bCAPs_vs_bFAPLs.csv")
 ```
 
 #############################
@@ -499,23 +498,4 @@ wat_nocc_diet[["SCT"]]["scale.data"] <- NULL
 saveRDS(wat_nocc_diet, file="F:/new_analysis/scripts/publication/wat_nocc.rds")
 ```
 
-```{r}
-seurat_object= wat_unexcluded
-
-Idents(seurat_object) = "wat_named_clusters"
-#new_cluster_ids <- c('APCs 1', 'APCs 2', "APCs 3", "APCs 4",'APCs 5', 'APCs 6', 'APCs 7',  "Myeloid cells", 'Glial cells' , 'Myoblasts')
-
-new_cluster_ids <- c('APCs 1', 'APCs 2', "APCs 3", "APCs 4",'APCs 5', 'APCs 6',  'Glial cells' , "Myeloid cells")
-
-names(new_cluster_ids) <- levels(seurat_object)
-seurat_object <- RenameIdents(seurat_object, new_cluster_ids)
-
-#create a new metadata column called "bat_unexcluded_clusters"
-#seurat_object@meta.data$bat_unexcluded_clusters <- as.factor(seurat_object@active.ident) 
-
-seurat_object@meta.data$wat_unexcluded_clusters <- as.factor(seurat_object@active.ident) 
-
-wat_unexcluded = seurat_object
-
-```
 

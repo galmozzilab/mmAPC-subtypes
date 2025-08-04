@@ -817,7 +817,222 @@ DimPlot(refquery, group.by='predicted.wat_wclusters', cols = c('#00cd66','#fcd58
 saveRDS(refquery, "F:/new_analysis/labeled_analysis/reference_mapping_rds/mapped_schwalie_merged_umap.rds")
 ```
 
-## Fig. EV6A - Violin plots of other peoples markers
+
+### Reference mapping for Merrick dataset
+```{r}
+library(scCustomize)
+library(Seurat)
+
+data_dir <- "F:/new_analysis/integrated_analysis/merrick/adult" 
+
+# Define the file prefix (PICK ADULT OR P12)
+file_prefix <- "GSM3717977_SCmurinep12_" #p12
+file_prefix <- "GSM3717978_SCmurineAdult_" #adult
+expr_mat <- Read10X_GEO(
+  data_dir = data_dir, 
+  sample_list = file_prefix # This tells the function to look for files starting with this prefix
+)
+
+######PROCESSING FOR BOTH ADULT AND P12#####
+
+#convert into seurat object
+seurat_object <- CreateSeuratObject(counts = expr_mat, project = "merrick", min.cells = 3, min.features = 200)
+
+#calculate percent mitochondrial RNA for watpreads
+seurat_object[["percent.mt"]] = PercentageFeatureSet(seurat_object, pattern = "^mt-")
+
+VlnPlot(seurat_object, features= c("nFeature_RNA", "nCount_RNA", "percent.mt"), pt.size=0.5, ncol = 3)
+
+
+
+#apply filter-- UMI 6000-60000, features 3900-7700, mito umi <5
+seurat_object <- subset(seurat_object, 
+                                 subset = nFeature_RNA > 500 & percent.mt < 5)
+
+
+####P12 dataset use lognormalize#####
+
+#normalizing the data -normalizes the feature expression measurements for each cell by the total expression, multiplies this by a scale factor (10,000 by default), and log-transforms the result
+seurat_object <- NormalizeData(seurat_object, normalization.method = "LogNormalize", scale.factor = 10000)
+
+#identification of highly variable features
+seurat_object <- FindVariableFeatures(seurat_object, selection.method = "vst", nfeatures = 2000)
+
+
+all.genes <- rownames(seurat_object)
+seurat_object <- ScaleData(seurat_object, features = all.genes)
+
+#PCA
+seurat_object <- RunPCA(seurat_object, features = VariableFeatures(object = seurat_object))
+
+#determine dimensionality
+ElbowPlot(seurat_object, ndims = 50, reduction = "pca")
+seurat_object <- JackStraw(seurat_object, num.replicate=100)
+seurat_object <- ScoreJackStraw(seurat_object, dims = 1:20)
+JackStrawPlot(seurat_object)
+
+
+#clustering
+seurat_object <- FindNeighbors(seurat_object, dims = 1:15) 
+
+seurat_object <- FindClusters(seurat_object, resolution = 0.188) # 10 clusters p12
+########################
+
+####Adult dataset use SCTransform#####
+seurat_object <- SCTransform(seurat_object)
+seurat_object <- RunPCA(seurat_object, features = VariableFeatures(object = seurat_object))
+seurat_object <- FindNeighbors(seurat_object, dims = 1:15) 
+seurat_object <- FindClusters(seurat_object, resolution = 0.3)
+
+#########NOTE: make sure you know if you seurat_object is currently ADULT or P12 before preceeding
+
+#tsne
+seurat_object <- RunTSNE(seurat_object, dims = 1:10)
+
+DimPlot(seurat_object, label=T, label.size=10 )
+
+Stacked_VlnPlot(seurat_object, c('Dpp4','Wnt2','Icam1',"Dlk1",'Clec11a',"F3", "Adipoq"))
+
+
+
+
+# representative markers from the paper
+group1= c('Akr1c18', 'Cd55','Anxa3', "Pi16","Sema3c", "Gap43",'Bmp7',"Dact2")
+group2= c("Ggt5",'Fabp4', 'Pparg', 'Apoe', 'Bmper', 'Cd36','Rarres2', 'Vcam1')
+group3= c("Fmo2",'Vit', 'Ifitm1', "Gdf10")
+group4= c('Wnt6', "Sfrp5","Klf5","Bace2")
+msc_preads= c('Ly6a','Thy1','Cd44','Pdgfra','Pdgfrb','Cd24a','Eng')
+group5= c('Egfl6','Emb')
+group6= c('Thbs4', 'Plxdc1')
+adipocyte= c('Plin1','Car3')
+smc= c('Acta2', 'Tagln')
+endothelial= c("Pecam1", "Egfl7")
+neural= c('Plp1', 'Mbp')
+
+
+#For adult dataset
+msc_preads= c('Ly6a','Cd34','Pdgfra','Pdgfrb')
+group1=c('Dpp4','Wnt2')
+group2= c('Icam1','Ggt5')
+group3= c('Clec11a','F3')
+smc= c('Acta2')
+endothelial=c('Pecam1')
+macro=c('Cd68')
+dendritic= c('Ccl5')
+tcell='Cd3d'
+bcell='Cd19'
+
+
+new_cluster_ids <- c('Group 2 committed (Icam1+)','Group 1 interstitial (Dpp4+)','Group 3 (Cd142+)',
+                     'Adipocyte','Neural Crest','Endothelial','SMC','Group 6', 'Group 4 (Wnt6+)', 'Group 5'
+)#p12
+
+new_cluster_ids <- c("Group 1 (Dpp4+)", 'Group 2 (Icam1+)', 'Group 3 (Cd142+)',
+                     'Endothelial', 'Macrophage', 'SMC', 'Dendritic cells','B cell',
+                     'T-cell','Macrophage')
+) #adult, recombined seurat clusters from sctransform, 1:15 neighbors, 0.3 cluster
+#adult
+
+#Rename the values in the new column
+names(new_cluster_ids) <- levels(seurat_object)
+#rename idents
+seurat_object <- RenameIdents(seurat_object, new_cluster_ids)
+seurat_object@meta.data$merrick_clusters <- as.factor(seurat_object@active.ident)
+
+
+#REFERENCE MAPPING:
+wat_cc <- RunUMAP(wat_cc, dims=1:10, return.model = TRUE) #have to return the model to run mapping
+
+
+#if analyzing adult, set adult as seurat object
+seurat_object <- adult
+#remove immune cells
+seurat_object <- subset(adult, idents = c('T-cell', "B cell", "Dendritic cells", 'Macrophage'), invert=TRUE )
+
+#Sarvari cells
+DefaultAssay(wat_cc) <-'SCT'
+anchors <- FindTransferAnchors(
+  reference = wat_cc,
+  query = seurat_object,
+  normalization.method = "SCT", #log norm for p12, sct for adult
+  reference.reduction = "pca",
+  dims = 1:50
+)
+#498 anchors p12
+#366 anchors adult
+#358 anchors adult without immune
+#678 anchors for SCT adult with immune
+#652 anchors for SCT adult without immune, will use this one
+wat_ref <- MapQuery(
+  anchorset = anchors,
+  query = seurat_object,
+  reference = wat,
+  refdata = list(
+    wat_wclusters= 'wat_named_wclusters'
+  ),
+  reference.reduction = "pca", 
+  reduction.model = "umap"
+)
+
+DimPlot(wat_ref, reduction='ref.umap', group.by= 'predicted.wat_wclusters')
+DimPlot(wat_ref, reduction='ref.umap')
+
+#FIGURE 5B MERRICK
+#count cells
+cell_counts <- table(wat_ref$merrick_clusters, wat_ref$predicted.wat_wclusters)
+cell_counts # FIGURE 5B data
+
+write.csv(cell_counts, "C:/Users/bouncybear223/Box/FAT scRNAseq paper/2025-07 EMBO REPORTS revision/merrick_refmap/adult/sct/adult_sct_no_immune_ref_counts.csv")
+#plotting on the reference UMAP
+
+reference= wat
+query=seurat_object
+reference <- DietSeurat(reference, counts = FALSE, dimreducs = c("umap"))
+
+query <- DietSeurat(wat_ref, counts = FALSE, dimreducs = c("ref.umap"))
+
+
+#merge reference and query
+reference$id <- 'reference'
+query$id <- 'query'
+
+#if run into naming issue:
+# Correctly add a prefix to cell names in the reference object
+reference <- RenameCells(object = reference, add.cell.id = "REF")
+
+# Correctly add a prefix to cell names in the query object
+query <- RenameCells(object = query, add.cell.id = "QUERY")
+
+refquery <- merge(reference, query)
+refquery[["umap"]] <- merge(reference[["umap"]], query[["ref.umap"]])
+#refquery <- RunUMAP(refquery, reduction = 'pca', dims = 1:50)
+
+merrick_colors=c("gold",
+                 'olivedrab3',
+                 "royalblue1",
+                 "hotpink3",
+                 "aquamarine3",
+                 'darkgreen',
+                 'steelblue2',
+                 'orange',
+                 'purple', 
+                  
+                 'violet')
+                 
+adult_sct_noimmune_colors = c('olivedrab3','royalblue','hotpink3','aquamarine','violet')
+
+
+#DimPlot(refquery, group.by = 'id', shuffle = TRUE, pt.size=3)
+
+dimplot <-DimPlot(refquery, group.by='merrick_clusters', pt.size = 3, na.value='lightgrey', cols=adult_sct_noimmune_colors) + NoLegend()
+
+ DimPlot(refquery, group.by='predicted.wat_wclusters', cols = c('#fcd589','#ff3030','#8c510a','#5ab4ac'), na.value="lightgrey", pt.size=3)
+
+
+
+```
+
+## Fig. EV6B - Violin plots of other peoples markers
 ```{r}
 wat_colors=c('#00cd66','#fcd589','#cd6600', '#ff3030','#8c510a','#5ab4ac','#01665e')
 Stacked_VlnPlot(wat, features= c"Ddp4", "Icam1", "Cd142", "Abcg1", "Klf4", "Foxop2", group.by= 'wat_named_wclusters', cols=wat_colors)
@@ -826,6 +1041,8 @@ Stacked_VlnPlot(wat, features= c"Ddp4", "Icam1", "Cd142", "Abcg1", "Klf4", "Foxo
 ## Fig. EV5B - Dot plots of other people's FAPLs markers and ours
 plot data will be extracted and plotted in GraphPad Prism
 ```{r}
+rdbu= rev(brewer.pal(5, "RdBu"))
+
 faps_list= c('Fn1','Fgf18','Ccn2','Ly6c1','Has2','Mfap5','Creb5','Mustn1','Tgfb2','Thy1','Igfbp6','Timp2','Cd9','Dkk3','Mgp','Gdf10','Meox2','Serping1','Nr2f2','Cxcl12','Cav1','Tmeff2','Tmem176a','Mgst3','Cryab','Cd81','Cpe','Shox2','Pid1','Fgf7','Il17d','Sdc2','Hspb2','Dcn','Tspan17','S100a4','Usp53','Naalad2','Osr1','Cisd1','Dock9','Id4','Rgs16','Med8','Prdm6','Abcc9','Sorbs1','Crim1','Galnt18','Lama2','Col14a1','Lum','Lamb2','Actn1','Epha3','Angpt2','Fstl3','Anxa3')
 
 #schwalie dotplot
@@ -858,4 +1075,18 @@ write.csv(dotplot_data, "holman_dotplot_data.csv")
 wat_dotplot <- DotPlot_scCustom(wat, faps_list, colors_use = rdbu, cols="RdBu", cluster.idents = T, x_lab_rotate=T, scale=T, dot.scale=10)
 wat_dotplot_data <- dotplot_obj$data
 write.csv(dotplot_data, "wat_dotplot_data.csv")
+```
+```{r}
+#merrick dotplot
+#MAKRE SURE IF ITS ADULT OR P12. seurat_object can be either, depends on which analysis youre doing.
+dotplot_obj <- DotPlot_scCustom(seurat_object, faps_list, cols="RdBu", cluster.idents = T, x_lab_rotate=T, scale=T, dot.scale=10)
+dotplot_data <- dotplot_obj$data
+write.csv(dotplot_data, "C:/Users/bouncybear223/Box/FAT scRNAseq paper/2025-07 EMBO REPORTS revision/merrick_refmap/adult_noimmune_dotplot_data.csv")
+```
 
+
+#Figure EV6A - other peoples markers on our dataset
+```{r}
+#assuming that you have wat_cc object loaded from wat_seurat_processing.Rmd
+wat_colors=c('#00cd66','#fcd589','#cd6600', '#ff3030','#8c510a','#5ab4ac','#01665e')
+Stacked_VlnPlot(wat_cc, c("Dpp4", "Icam1","F3","Abcg1","Klf4","Foxp2"), colors_use = wat_colors)

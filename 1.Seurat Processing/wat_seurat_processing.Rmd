@@ -459,3 +459,216 @@ Table EV3 - DEGs between wCAPs vs wFAPLs
 ```{r}
 wcaps_wfapls_degs <- FindMarkers(wat_cc, ident.1='wCAPs', ident.2 = 'wFAPLs')
 write.csv(wcaps_wfapls_degs, file ="DEGs_wCAPs_vs_wFAPLs.csv")
+```
+
+REVISION - reviewer request to pseudobulk
+pseudobulking
+```{r}
+library(Seurat)
+library(edgeR)
+library(Matrix)
+library(dplyr)
+
+
+
+wfapls_sct<- FindMarkers(wat, ident.1='wFAPLs', assay = 'SCT')
+wfapls_sct_filtered <- wfapls_sct %>% filter(p_val_adj<0.05 & avg_log2FC>0)
+wfapls_lognorm<- FindMarkers(wat, ident.1='wFAPLs', assay = 'RNA')
+wfapls_lognorm_filtered <- wfapls_lognorm %>% filter(p_val_adj<0.05 & avg_log2FC>0)
+
+
+
+bfapls_sct<- FindMarkers(bat, ident.1='bFAPLs', assay = 'SCT')
+bfapls_sct_filtered <- bfapls_sct %>% filter(p_val_adj<0.05 & avg_log2FC>0)
+bfapls_lognorm<- FindMarkers(bat, ident.1='bFAPLs', assay = 'RNA')
+bfapls_lognorm_filtered <- bfapls_lognorm %>% filter(p_val_adj<0.05 & avg_log2FC>0)
+
+# ------------ SETTINGS ------------
+
+n_reps <- 3
+# Define dataset configurations
+
+###For FAPLs
+datasets <- list(
+  white = list(
+    obj = wat,
+    cluster_col = "wat_named_wclusters",
+    fapl_label = "wFAPLs",
+    max_cells= 541
+  ),
+  brown = list(
+    obj = bat,
+    cluster_col = "bat_named_bclusters",
+    fapl_label = "bFAPLs",
+    max_cells= 855
+  )
+)
+###
+
+
+
+
+###for CAPs
+datasets <- list(
+  white = list(
+    obj = wat,
+    cluster_col = "wat_named_wclusters",
+    fapl_label = "wCAPs",
+    max_cells= 1453
+  ),
+  brown = list(
+    obj = bat,
+    cluster_col = "bat_named_bclusters",
+    fapl_label = "bCAPs",
+    max_cells= 843
+  )
+)
+###
+deg_results <- list()
+
+# ------------ MAIN LOOP ------------
+
+for (tissue in names(datasets)) {
+  message(paste("Processing", tissue, "dataset..."))
+  
+  seurat_obj <- datasets[[tissue]]$obj
+  cluster_col <- datasets[[tissue]]$cluster_col
+  fapl_label <- datasets[[tissue]]$fapl_label
+  max_cells_per_group <- datasets[[tissue]]$max_cells
+  
+  # Prepare metadata
+  meta <- seurat_obj@meta.data
+  meta$group <- ifelse(meta[[cluster_col]] == fapl_label, "FAPL", "Other")
+  meta$pseudorep <- NA_character_
+  
+  # Downsampling and pseudo-replicate assignment
+  set.seed(42)
+  for (grp in c("FAPL", "Other")) {
+    cells_all <- rownames(meta[meta$group == grp, ])
+    
+    # Downsample if needed
+    cells <- if (length(cells_all) > max_cells_per_group) {
+      sample(cells_all, max_cells_per_group, replace = FALSE)
+    } else {
+      cells_all
+    }
+    
+    # Assign to pseudo-replicates
+    shuffled <- sample(cells)
+    split <- cut(seq_along(shuffled), breaks = n_reps, labels = FALSE)
+    
+    for (i in 1:n_reps) {
+      this_rep_cells <- shuffled[split == i]
+      meta[this_rep_cells, "pseudorep"] <- paste0(grp, "_rep", i)
+    }
+  }
+  
+  # Update Seurat metadata
+  seurat_obj@meta.data <- meta
+  
+  # ------------ PSEUDOBULK AGGREGATION ------------
+  
+  # Sync counts and metadata
+  counts <- GetAssayData(seurat_obj, slot = "counts")
+  shared_cells <- intersect(colnames(counts), rownames(meta))
+  counts <- counts[, shared_cells]
+  meta <- meta[shared_cells, ]
+  
+  # Aggregate counts
+  samples <- unique(na.omit(meta$pseudorep))
+  pseudobulk_mat <- sapply(samples, function(s) {
+    cell_ids <- rownames(meta[meta$pseudorep == s, ])
+    valid_ids <- intersect(cell_ids, colnames(counts))
+    if (length(valid_ids) == 0) {
+      warning(paste("No valid cells for", s))
+      return(rep(0, nrow(counts)))
+    }
+    rowSums(counts[, valid_ids, drop = FALSE])
+  })
+  
+  # ------------ edgeR DE ANALYSIS ------------
+  
+  group <- factor(gsub("_rep\\d+", "", colnames(pseudobulk_mat)))
+  group <- relevel(group, ref = "Other")
+  dge <- DGEList(counts = pseudobulk_mat, group = group)
+  keep <- filterByExpr(dge)
+  dge <- dge[keep,, keep.lib.sizes = FALSE]
+  dge <- calcNormFactors(dge)
+  
+  design <- model.matrix(~group)
+  dge <- estimateDisp(dge, design)
+  fit <- glmQLFit(dge, design)
+  res <- glmQLFTest(fit, coef = 2)
+  
+  # Store results
+  deg_results[[tissue]] <- topTags(res, n = Inf)$table
+}
+
+# ------------ INTERSECT SHARED DEGs ------------
+
+deg_white <- deg_results$white %>% filter(FDR < 0.05 & logFC>0) %>% rownames()
+deg_brown <- deg_results$brown %>% filter(FDR < 0.05 & logFC>0) %>% rownames()
+#shared_fapl_markers <- intersect(deg_white, deg_brown)
+shared_caps_markers <- intersect(deg_white, deg_brown)
+# ------------ OUTPUT ------------
+
+cat("Number of shared FAPL markers:", length(shared_fapl_markers), "\n")
+print(head(shared_fapl_markers))
+
+cat("Number of shared CAP markers:", length(shared_caps_markers), "\n")
+
+
+shared_caps_markers <- intersect(deg_white, deg_brown)
+unique_wcaps <- setdiff(deg_white, deg_brown)
+unique_bcaps <- setdiff(deg_brown, deg_white)
+
+shared_fapls_markers <- intersect(deg_white, deg_brown)
+unique_wfapls <- setdiff(deg_white, deg_brown)
+unique_bfapls <- setdiff(deg_brown, deg_white)
+
+
+pseudo_wfapls= deg_white
+pseudo_bfapls= deg_brown
+pseudo_wcaps= deg_white
+pseudo_bcaps= deg_brown
+
+save_folder= "C:/Users/bouncybear223/Box/FAT scRNAseq paper/2025-07 EMBO REPORTS revision/pseudobulk/"
+
+# Optionally save results
+write.csv(deg_results$white, paste0(save_folder, "white_pseudoFAPL_DEGs.csv"))
+write.csv(deg_results$brown, paste0(save_folder,"brown_pseudoFAPL_DEGs.csv"))
+write.csv(shared_fapl_markers, paste0(save_folder,"shared_pseudoFAPL_UP_markers.csv"))
+write.csv(unique_wfapls, paste0(save_folder,"unique_pseudo_wFAPLs_UP_markers.csv"))
+write.csv(unique_bfapls, paste0(save_folder,"unique_pseudo_bFAPLs_UP_markers.csv"))
+
+
+write.csv(deg_results$white, paste0(save_folder, "white_pseudoCAPs_DEGs.csv"))
+write.csv(deg_results$brown, paste0(save_folder,"brown_pseudoCAPs_DEGs.csv"))
+write.csv(shared_caps_markers, paste0(save_folder,"shared_pseudoCAPs_UP_markers.csv"))
+write.csv(unique_wcaps, paste0(save_folder,"unique_pseudo_wCAPs_markers.csv"))
+write.csv(unique_bcaps, paste0(save_folder,"unique_pseudo_bCAPs_markers.csv"))
+#bulk_wfapls<- deg_results$white %>% filter(logFC>0 & FDR <0.05 & PValue<0.05) %>% rownames()
+#bulk_bfapls<- deg_results$brown %>% filter(logFC>0 & FDR <0.05 & PValue<0.05) %>% rownames()
+
+library(VennDiagram)
+venn.plot <- venn.diagram(
+  x = list(Pseudo_wFAPLs = deg_white, Pseudo_bFAPLs = deg_brown),
+  filename = NULL,
+  fill = c("khaki", "royalblue"), alpha = 0.5
+)
+grid::grid.draw(venn.plot)
+
+
+library(VennDiagram)
+venn.plot <- venn.diagram(
+  x = list(Pseudo_wCAPs= deg_white, Pseudo_bCAPs = deg_brown),
+  filename = NULL,
+  fill = c("khaki", "royalblue"), alpha = 0.5
+)
+grid::grid.draw(venn.plot)
+
+
+
+
+
+```
